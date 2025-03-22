@@ -1,2 +1,3 @@
-# iter
-Iterator utiliies for Golang
+# Sequence (Iterator) Utilities for Golang
+
+Initial version
