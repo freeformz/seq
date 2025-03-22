@@ -17,13 +17,51 @@ func With[T any](v ...T) iter.Seq[T] {
 	}
 }
 
+// KV pairs a key and a value together. Easiest way to use this is by declaring a local type with the K and V types you want
+// to use and then use that, like so:
+//
+//	func(...) {
+//		type lKV = KV[string, string]}
+//		i := WithKV(lKV{"a", "1"}, lKV{"b", "2"}, lKV{"c", "3"})
+//	...
+type KV[K, V any] struct {
+	K K
+	V V
+}
+
+// WithKV returns a sequence with the provided key-value pairs. The key-value pairs are iterated over lazily when the returned
+// sequence is iterated over.
+func WithKV[K, V any](kv ...KV[K, V]) iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		for _, kv := range kv {
+			if !yield(kv.K, kv.V) {
+				return
+			}
+		}
+	}
+}
+
 // Map the values in the sequence to a new sequence of values by applying the function fn to each value. Function application
 // happens lazily when the returned sequence is iterated over.
 func Map[T, O any](seq iter.Seq[T], fn func(T) O) iter.Seq[O] {
 	return func(yield func(o O) bool) {
-		seq(func(t T) bool {
-			return yield(fn(t))
-		})
+		for o := range seq {
+			if !yield(fn(o)) {
+				return
+			}
+		}
+	}
+}
+
+// MapKV maps the key-value pairs in the sequence to a new sequence of key-value pairs by applying the function fn to each
+// key-value pair. Function application happens lazily when the returned sequence is iterated over.
+func MapKV[K, V, K1, V1 any](seq iter.Seq2[K, V], fn func(K, V) (K1, V1)) iter.Seq2[K1, V1] {
+	return func(yield func(K1, V1) bool) {
+		for k, v := range seq {
+			if !yield(fn(k, v)) {
+				return
+			}
+		}
 	}
 }
 
@@ -31,9 +69,30 @@ func Map[T, O any](seq iter.Seq[T], fn func(T) O) iter.Seq[O] {
 // lazily when the returned sequence is iterated over.
 func Append[T any](seq iter.Seq[T], items ...T) iter.Seq[T] {
 	return func(yield func(T) bool) {
-		seq(yield)
+		for item := range seq {
+			if !yield(item) {
+				return
+			}
+		}
 		for _, item := range items {
 			if !yield(item) {
+				return
+			}
+		}
+	}
+}
+
+// AppendKV appends the key-value pairs to the sequence and returns an extended sequence. The provided sequence and appended
+// key-value pairs are iterated over lazily when the returned sequence is iterated over.
+func AppendKV[K, V any](seq iter.Seq2[K, V], items ...KV[K, V]) iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		for k, v := range seq {
+			if !yield(k, v) {
+				return
+			}
+		}
+		for _, kv := range items {
+			if !yield(kv.K, kv.V) {
 				return
 			}
 		}
@@ -53,16 +112,63 @@ func Filter[T any](seq iter.Seq[T], fn func(T) bool) iter.Seq[T] {
 	}
 }
 
-// Iter2 converts an iter.Seq[T] to an iter.Seq2[int, T]. The provided sequence is iterated over lazily when the returned
+// FilterKV filters the key-value pairs in the sequence by applying fn to each key-value pair. Filtering happens when the
+// returned sequence is iterated over.
+func FilterKV[K, V any](seq iter.Seq2[K, V], fn func(K, V) bool) iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		for k, v := range seq {
+			if fn(k, v) {
+				if !yield(k, v) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// IterIntV converts an iter.Seq[T] to an iter.Seq2[int, T]. The provided sequence is iterated over lazily when the returned
 // sequence is iterated over.
-func Iter2[T any](iter iter.Seq[T]) func(func(i int, t T) bool) {
-	var i int
-	return func(yield func(i int, t T) bool) {
-		for t := range iter {
-			if !yield(i, t) {
+func IterIntV[T any](iter iter.Seq[T]) iter.Seq2[int, T] {
+	i := -1
+	return IterKV(iter, func(T) int {
+		i++
+		return i
+	})
+}
+
+// IterKV converts an iter.Seq[V] to an iter.Seq2[K, V]. The provided sequence is iterated over lazily when the returned
+// sequence is iterated over. keyFn is called for each value to get the key.
+func IterKV[K, V any](iter iter.Seq[V], keyFn func(V) K) iter.Seq2[K, V] {
+	return func(yield func(k K, v V) bool) {
+		for v := range iter {
+			k := keyFn(v)
+			if !yield(k, v) {
 				return
 			}
-			i++
+		}
+	}
+}
+
+// IterK converts an iter.Seq2[K, V] to an iter.Seq[K]. The provided sequence is iterated over lazily when the returned
+// sequence is iterated over.
+func IterK[K, V any](iter iter.Seq2[K, V]) iter.Seq[K] {
+	return func(yield func(k K) bool) {
+		for k := range iter {
+			if !yield(k) {
+				return
+			}
+		}
+	}
+}
+
+// IterV converts an iter.Seq2[K, V] to an iter.Seq[V]. The provided sequence is iterated over lazily when the returned
+// sequence is iterated over.
+func IterV[K, V any](iter iter.Seq2[K, V]) iter.Seq[V] {
+	return func(yield func(v V) bool) {
+		for _, v := range iter {
+			if !yield(v) {
+				return
+			}
 		}
 	}
 }
@@ -72,7 +178,7 @@ func Iter2[T any](iter iter.Seq[T]) func(func(i int, t T) bool) {
 func Max[T cmp.Ordered](seq iter.Seq[T]) (T, bool) {
 	var mt T
 	var value bool
-	for i, t := range Iter2(seq) {
+	for i, t := range IterIntV(seq) {
 		switch i {
 		case 0:
 			mt = t
@@ -88,7 +194,7 @@ func Max[T cmp.Ordered](seq iter.Seq[T]) (T, bool) {
 func MaxFunc[T any](seq iter.Seq[T], compare func(T, T) int) (T, bool) {
 	var mt T
 	var value bool
-	for i, t := range Iter2(seq) {
+	for i, t := range IterIntV(seq) {
 		switch i {
 		case 0:
 			mt = t
@@ -107,7 +213,7 @@ func MaxFunc[T any](seq iter.Seq[T], compare func(T, T) int) (T, bool) {
 func Min[T cmp.Ordered](seq iter.Seq[T]) (T, bool) {
 	var mt T
 	var value bool
-	for i, t := range Iter2(seq) {
+	for i, t := range IterIntV(seq) {
 		switch i {
 		case 0:
 			mt = t
@@ -123,7 +229,7 @@ func Min[T cmp.Ordered](seq iter.Seq[T]) (T, bool) {
 func MinFunc[T any](seq iter.Seq[T], compare func(T, T) int) (T, bool) {
 	var mt T
 	var value bool
-	for i, t := range Iter2(seq) {
+	for i, t := range IterIntV(seq) {
 		switch i {
 		case 0:
 			mt = t
@@ -137,12 +243,32 @@ func MinFunc[T any](seq iter.Seq[T], compare func(T, T) int) (T, bool) {
 	return mt, value
 }
 
+// Reduce the sequence to a single value by applying the function fn to each value. The provided sequence is iterated
+// over before Reduce returns.
+func Reduce[T, O any](seq iter.Seq[T], initial O, fn func(agg O, t T) O) O {
+	agg := initial
+	for t := range seq {
+		agg = fn(agg, t)
+	}
+	return agg
+}
+
+// ReduceKV reduces the sequence to a single value by applying the function fn to each key-value pair. The provided sequence is iterated
+// over before ReduceKV returns.
+func ReduceKV[K, V, O any](seq iter.Seq2[K, V], initial O, fn func(agg O, k K, v V) O) O {
+	agg := initial
+	for k, v := range seq {
+		agg = fn(agg, k, v)
+	}
+	return agg
+}
+
 // Compact returns an iterator that yields all values that are not equal to the previous value. The provided sequence is iterated
 // over lazily when the returned sequence is iterated over.
 func Compact[T comparable](seq iter.Seq[T]) iter.Seq[T] {
 	return func(yield func(T) bool) {
 		var prev T
-		for i, t := range Iter2(seq) {
+		for i, t := range IterIntV(seq) {
 			switch i {
 			case 0:
 				prev = t
@@ -167,7 +293,7 @@ func Compact[T comparable](seq iter.Seq[T]) iter.Seq[T] {
 func CompactFunc[T any](seq iter.Seq[T], equal func(T, T) bool) iter.Seq[T] {
 	return func(yield func(T) bool) {
 		var prev T
-		for i, t := range Iter2(seq) {
+		for i, t := range IterIntV(seq) {
 			switch i {
 			case 0:
 				prev = t
@@ -322,7 +448,7 @@ func Replace[T comparable](seq iter.Seq[T], old, new T) iter.Seq[T] {
 // IsSorted returns true if the sequence is sorted. The provided sequence is iterated over before IsSorted returns.
 func IsSorted[T cmp.Ordered](seq iter.Seq[T]) bool {
 	var prev T
-	for i, t := range Iter2(seq) {
+	for i, t := range IterIntV(seq) {
 		switch i {
 		case 0:
 			prev = t

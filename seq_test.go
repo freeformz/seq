@@ -7,6 +7,32 @@ import (
 	"strings"
 )
 
+func ExampleWith() {
+	i := With(1, 2, 3)
+
+	for v := range i {
+		fmt.Println(v)
+	}
+
+	// Output:
+	// 1
+	// 2
+	// 3
+}
+
+func ExampleWithKV() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+
+	for k, v := range i {
+		fmt.Println(k, v)
+	}
+
+	// Unordered output:
+	// a 1
+	// b 2
+	// c 3
+}
 func ExampleMap() {
 	i := With(1, 2, 3)
 
@@ -24,16 +50,50 @@ func ExampleMap() {
 	// [1 2 3]
 }
 
+func ExampleMapKV() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+
+	s := MapKV(i, func(k string, v int) (string, string) {
+		return k, "=> " + strconv.Itoa(v)
+	})
+	for k, v := range s {
+		fmt.Println(k, v)
+	}
+
+	// Output:
+	// a => 1
+	// b => 2
+	// c => 3
+}
+
 func ExampleAppend() {
 	i := With(1, 2, 3)
 
 	i = Append(i, 4, 5, 6)
+	i = Append(i, 7, 8, 9)
 	i = Append(i, 9, 8, 7)
 
 	fmt.Println(slices.Collect(i))
 
 	// Output:
-	// [1 2 3 4 5 6 9 8 7]
+	// [1 2 3 4 5 6 7 8 9 9 8 7]
+}
+
+func ExampleAppendKV() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+
+	i = AppendKV(i, tKV{K: "d", V: 4}, tKV{K: "e", V: 5}, tKV{K: "f", V: 6})
+	i = AppendKV(i, tKV{K: "g", V: 7}, tKV{K: "h", V: 8}, tKV{K: "i", V: 9})
+
+	for k, v := range i {
+		fmt.Printf("%s%d", k, v)
+	}
+	fmt.Println()
+
+	// Output:
+	// a1b2c3d4e5f6g7h8i9
 }
 
 func ExampleFilter() {
@@ -47,6 +107,22 @@ func ExampleFilter() {
 
 	// Output:
 	// [2 4 6 8]
+}
+
+func ExampleFilterKV() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+
+	s := FilterKV(i, func(k string, v int) bool {
+		return v%2 == 0
+	})
+
+	for k, v := range s {
+		fmt.Println(k, v)
+	}
+
+	// Output:
+	// b 2
 }
 
 func ExampleMin() {
@@ -101,10 +177,43 @@ func ExampleMaxFunc() {
 	//  false
 }
 
-func ExampleIter2() {
+func ExampleReduce() {
+	i := With(1, 2, 3, 4, 5)
+
+	fmt.Println(
+		Reduce(i, 10, func(a, b int) int {
+			return a + b
+		}),
+	)
+
+	out := Reduce(i, "a", func(a string, b int) string {
+		return strings.Repeat(a, b)
+	})
+	fmt.Println(out)
+	fmt.Println(len(out))
+
+	// Output:
+	// 25
+	// aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+	// 120
+}
+
+func ExampleReduceKV() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+	out := ReduceKV(i, "hello: ", func(a, k string, v int) string {
+		return a + k + strconv.Itoa(v)
+	})
+	fmt.Println(out)
+
+	// Output:
+	// hello: a1b2c3
+}
+
+func ExampleIterIntV() {
 	i := With(1, 2, 3, 4)
 
-	s := Iter2(i)
+	s := IterIntV(i)
 	for i, v := range s {
 		fmt.Printf("%d: %d\n", i, v)
 	}
@@ -114,6 +223,32 @@ func ExampleIter2() {
 	// 1: 2
 	// 2: 3
 	// 3: 4
+}
+
+func ExampleIterK() {
+	type tKV = KV[string, string]
+	i := WithKV(tKV{K: "a", V: "1"}, tKV{K: "b", V: "2"}, tKV{K: "c", V: "3"})
+	for k := range IterK(i) {
+		fmt.Println(k)
+	}
+
+	// Unordered output:
+	// a
+	// b
+	// c
+}
+
+func ExampleIterV() {
+	type tKV = KV[string, string]
+	i := WithKV(tKV{K: "a", V: "1"}, tKV{K: "b", V: "2"}, tKV{K: "c", V: "3"})
+	for k := range IterV(i) {
+		fmt.Println(k)
+	}
+
+	// Unordered output:
+	// 1
+	// 2
+	// 3
 }
 
 func ExampleCompact() {
