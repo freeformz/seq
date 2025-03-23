@@ -151,6 +151,31 @@ func ExampleMinFunc() {
 	//  false
 }
 
+func ExampleMinFuncKV() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+
+	fmt.Println(MinFuncKV(i, func(a tKV, b tKV) int {
+		return a.V - b.V
+	}))
+
+	fmt.Println(MinFuncKV(i, func(a tKV, b tKV) int {
+		return strings.Compare(a.K, b.K)
+	}))
+
+	fmt.Println(MinFuncKV(i, func(a tKV, b tKV) int {
+		if a.V == 3 { // pretend any value of 3 is the min
+			return -1
+		}
+		return 1
+	}))
+
+	// Output:
+	// {a 1} true
+	// {a 1} true
+	// {c 3} true
+}
+
 func ExampleMax() {
 	i := With(9, 8, 7, 6, 5, 4, 3, 2, 1)
 
@@ -175,6 +200,31 @@ func ExampleMaxFunc() {
 	// Output:
 	// world true
 	//  false
+}
+
+func ExampleMaxFuncKV() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+
+	fmt.Println(MaxFuncKV(i, func(a tKV, b tKV) int {
+		return a.V - b.V
+	}))
+
+	fmt.Println(MaxFuncKV(i, func(a tKV, b tKV) int {
+		return strings.Compare(a.K, b.K)
+	}))
+
+	fmt.Println(MaxFuncKV(i, func(a tKV, b tKV) int {
+		if a.V == 1 { // pretend any value of 1 is the max
+			return 1
+		}
+		return -1
+	}))
+
+	// Output:
+	// {c 3} true
+	// {c 3} true
+	// {a 1} true
 }
 
 func ExampleReduce() {
@@ -210,12 +260,15 @@ func ExampleReduceKV() {
 	// hello: a1b2c3
 }
 
-func ExampleIterIntV() {
+func ExampleIterKV() {
 	i := With(1, 2, 3, 4)
 
-	s := IterIntV(i)
-	for i, v := range s {
+	for i, v := range IterKV(i, IntK[int]()) {
 		fmt.Printf("%d: %d\n", i, v)
+	}
+
+	for i, v := range IterKV(i, strconv.Itoa) {
+		fmt.Printf("%s: %d\n", i, v)
 	}
 
 	// Output:
@@ -223,6 +276,10 @@ func ExampleIterIntV() {
 	// 1: 2
 	// 2: 3
 	// 3: 4
+	// 1: 1
+	// 2: 2
+	// 3: 3
+	// 4: 4
 }
 
 func ExampleIterK() {
@@ -283,6 +340,51 @@ func ExampleCompactFunc() {
 	// 5
 }
 
+func ExampleCompactKV() {
+	type tKV = KV[string, int]
+	i := WithKV(
+		tKV{K: "a", V: 1},
+		tKV{K: "a", V: 2},
+		tKV{K: "a", V: 2},
+		tKV{K: "b", V: 3},
+		tKV{K: "b", V: 3},
+		tKV{K: "c", V: 4},
+	)
+
+	for k, v := range CompactKV(i) {
+		fmt.Println(k, v)
+	}
+
+	// Output:
+	// a 1
+	// a 2
+	// b 3
+	// c 4
+}
+
+func ExampleCompactKVFunc() {
+	type tKV = KV[string, int]
+	i := WithKV(
+		tKV{K: "a", V: 1},
+		tKV{K: "a", V: 2},
+		tKV{K: "a", V: 2},
+		tKV{K: "b", V: 3},
+		tKV{K: "b", V: 3},
+		tKV{K: "c", V: 4},
+	)
+
+	for k, v := range CompactKVFunc(i, func(a, b tKV) bool {
+		return a.K == b.K
+	}) {
+		fmt.Println(k, v)
+	}
+
+	// Output:
+	// a 1
+	// b 3
+	// c 4
+}
+
 func ExampleChunk() {
 	i := With(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
 
@@ -295,6 +397,34 @@ func ExampleChunk() {
 	// [4 5 6]
 	// [7 8 9]
 	// [10 11]
+}
+
+func ExampleChunkKV() {
+	type tKV = KV[string, int]
+	itr := WithKV(
+		tKV{K: "a", V: 1},
+		tKV{K: "a", V: 2},
+		tKV{K: "a", V: 2},
+		tKV{K: "b", V: 3},
+		tKV{K: "b", V: 3},
+		tKV{K: "c", V: 4},
+		tKV{K: "c", V: 5},
+	)
+
+	var i int
+	for chunk := range ChunkKV(itr, 3) {
+		fmt.Printf("Chunk %d: ", i)
+		for k, v := range chunk {
+			fmt.Printf("(%s %d)", k, v)
+		}
+		fmt.Println()
+		i++
+	}
+
+	// Output:
+	// Chunk 0: (a 1)(a 2)(a 2)
+	// Chunk 1: (b 3)(b 3)(c 4)
+	// Chunk 2: (c 5)
 }
 
 func ExampleCompare() {
@@ -347,6 +477,78 @@ func ExampleCompareFunc() {
 	// -1
 }
 
+func ExampleCompareKV() {
+	type tKV = KV[string, int]
+	a := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+	b := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+	fmt.Println(CompareKV(a, b))
+
+	c := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2})
+	fmt.Println(CompareKV(a, c))
+
+	d := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 4})
+	fmt.Println(CompareKV(a, d))
+
+	e := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "e", V: 3})
+	fmt.Println(CompareKV(a, e))
+
+	f := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3}, tKV{K: "d", V: 4})
+	fmt.Println(CompareKV(a, f))
+
+	// Output:
+	// 0
+	// 1
+	// -1
+	// -1
+	// -1
+}
+
+func ExampleCompareKVFunc() {
+	type aKV = KV[string, int]
+	a := WithKV(aKV{K: "a", V: 1}, aKV{K: "b", V: 2}, aKV{K: "c", V: 3})
+	b := WithKV(aKV{K: "a", V: 1}, aKV{K: "b", V: 2}, aKV{K: "c", V: 3})
+	fmt.Println(CompareKVFunc(a, b, func(a aKV, b aKV) int {
+		return a.V - b.V
+	}))
+
+	c := WithKV(aKV{K: "a", V: 1}, aKV{K: "b", V: 2})
+	fmt.Println(CompareKVFunc(a, c, func(a aKV, b aKV) int {
+		return strings.Compare(a.K, b.K)
+	}))
+
+	d := WithKV(aKV{K: "a", V: 1}, aKV{K: "b", V: 2}, aKV{K: "c", V: 4})
+	fmt.Println(CompareKVFunc(a, d, func(a aKV, b aKV) int {
+		return a.V - b.V
+	}))
+
+	e := WithKV(aKV{K: "a", V: 1}, aKV{K: "b", V: 2}, aKV{K: "e", V: 3})
+	fmt.Println(CompareKVFunc(a, e, func(a aKV, b aKV) int {
+		return strings.Compare(a.K, b.K)
+	}))
+
+	f := WithKV(aKV{K: "a", V: 1}, aKV{K: "b", V: 2}, aKV{K: "c", V: 3}, aKV{K: "d", V: 4})
+	fmt.Println(CompareKVFunc(a, f, func(a aKV, b aKV) int {
+		return a.V - b.V
+	}))
+
+	type bKV = KV[string, string]
+	g := WithKV(bKV{K: "a", V: "1"}, bKV{K: "b", V: "2"}, bKV{K: "c", V: "3"})
+	fmt.Println(CompareKVFunc(a, g, func(a aKV, b bKV) int {
+		if c := strings.Compare(a.K, b.K); c != 0 {
+			return c
+		}
+		return strings.Compare(strconv.Itoa(a.V), b.V)
+	}))
+
+	// Output:
+	// 0
+	// 1
+	// -1
+	// -1
+	// -1
+	// 0
+}
+
 func ExampleContains() {
 	i := With(1, 2, 3, 4, 5)
 
@@ -358,11 +560,35 @@ func ExampleContains() {
 	// false
 }
 
+func ExampleContainsKV() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+
+	fmt.Println(ContainsKV(i, "b", 2))
+	fmt.Println(ContainsKV(i, "d", 1))
+
+	// Output:
+	// true
+	// false
+}
+
 func ExampleContainsFunc() {
 	i := With("hi", "hello", "world")
 
 	fmt.Println(ContainsFunc(i, func(s string) bool { return s == "hello" }))
 	fmt.Println(ContainsFunc(i, func(s string) bool { return s == "zebra" }))
+
+	// Output:
+	// true
+	// false
+}
+
+func ExampleContainsKVFunc() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+
+	fmt.Println(ContainsKVFunc(i, func(k string, v int) bool { return k == "b" && v == 2 }))
+	fmt.Println(ContainsKVFunc(i, func(k string, v int) bool { return k == "d" && v == 1 }))
 
 	// Output:
 	// true
@@ -386,6 +612,28 @@ func ExampleEqual() {
 	// false
 }
 
+func ExampleEqualKV() {
+	type tKV = KV[string, int]
+	a := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+	b := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+	fmt.Println(EqualKV(a, b))
+
+	c := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2})
+	fmt.Println(EqualKV(a, c))
+
+	d := WithKV(tKV{K: "c", V: 3}, tKV{K: "b", V: 2}, tKV{K: "a", V: 1})
+	fmt.Println(EqualKV(a, d))
+
+	e := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3}, tKV{K: "d", V: 4})
+	fmt.Println(EqualKV(a, e))
+
+	// Output:
+	// true
+	// false
+	// false
+	// false
+}
+
 func ExampleEqualFunc() {
 	a := With("hi", "hello", "world")
 	b := With("hi", "hello", "world")
@@ -402,6 +650,42 @@ func ExampleEqualFunc() {
 
 	// Output:
 	// true
+	// false
+	// false
+	// true
+}
+
+func ExampleEqualKVFunc() {
+	type tKV = KV[string, int]
+	a := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+	b := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+	fmt.Println(EqualKVFunc(a, b, func(a tKV, b tKV) bool {
+		return a.V == b.V && a.K == b.K
+	}))
+
+	c := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2})
+	fmt.Println(EqualKVFunc(a, c, func(a tKV, b tKV) bool {
+		return a.V == b.V && a.K == b.K
+	}))
+
+	d := WithKV(tKV{K: "c", V: 3}, tKV{K: "b", V: 2}, tKV{K: "a", V: 1})
+	fmt.Println(EqualKVFunc(a, d, func(a tKV, b tKV) bool {
+		return a.V == b.V && a.K == b.K
+	}))
+
+	e := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3}, tKV{K: "d", V: 4})
+	fmt.Println(EqualKVFunc(a, e, func(a tKV, b tKV) bool {
+		return a.V == b.V && a.K == b.K
+	}))
+
+	f := WithKV(tKV{K: "A", V: 1}, tKV{K: "B", V: 2}, tKV{K: "C", V: 3})
+	fmt.Println(EqualKVFunc(a, f, func(a tKV, b tKV) bool {
+		return a.V == b.V && strings.EqualFold(a.K, b.K)
+	}))
+
+	// Output:
+	// true
+	// false
 	// false
 	// false
 	// true
@@ -431,6 +715,24 @@ func ExampleReplace() {
 	// [1 6 3 7 5]
 }
 
+func ExampleReplaceKV() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+
+	i = ReplaceKV(i, tKV{"a", 1}, tKV{"a", 6})
+	i = ReplaceKV(i, tKV{"c", 7}, tKV{"c", 8}) // no effect
+
+	for k, v := range i {
+		fmt.Println(k, v)
+	}
+	fmt.Println()
+
+	// Output:
+	// a 6
+	// b 2
+	// c 3
+}
+
 func ExampleIsSorted() {
 	i := With(1, 2, 3, 4, 5)
 	fmt.Println(IsSorted(i))
@@ -442,5 +744,26 @@ func ExampleIsSorted() {
 	// Output:
 	// true
 	// true
+	// false
+}
+
+func ExampleIsSortedKV() {
+	type kv = KV[string, int]
+	i := WithKV(kv{K: "a", V: 1}, kv{K: "b", V: 2}, kv{K: "c", V: 3})
+	fmt.Println(IsSortedKV(i))
+
+	i = WithKV(kv{K: "a", V: 1}, kv{K: "b", V: 2}, kv{K: "b", V: 2}, kv{K: "c", V: 3})
+	fmt.Println(IsSortedKV(i))
+
+	i = WithKV(kv{K: "a", V: 1}, kv{K: "b", V: 2}, kv{K: "c", V: 3}, kv{K: "d", V: 2})
+	fmt.Println(IsSortedKV(i))
+
+	i = WithKV(kv{"b", 1}, kv{"a", 2}, kv{"c", 3})
+	fmt.Println(IsSortedKV(i))
+
+	// Output:
+	// true
+	// true
+	// false
 	// false
 }
