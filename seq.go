@@ -3,6 +3,7 @@ package seq
 import (
 	"cmp"
 	"iter"
+	"sync/atomic"
 )
 
 // With returns a sequence with the provided values. The values are iterated over lazily when the returned sequence is iterated
@@ -126,14 +127,14 @@ func FilterKV[K, V any](seq iter.Seq2[K, V], fn func(K, V) bool) iter.Seq2[K, V]
 	}
 }
 
-// IterIntV converts an iter.Seq[T] to an iter.Seq2[int, T]. The provided sequence is iterated over lazily when the returned
-// sequence is iterated over.
-func IterIntV[T any](iter iter.Seq[T]) iter.Seq2[int, T] {
-	i := -1
-	return IterKV(iter, func(T) int {
-		i++
-		return i
-	})
+// IntK returns a function that returns an increasing integer each time it is called, starting at 0. The returned function is stateful
+// and is safe to call concurrently.
+func IntK[V any]() func(V) int {
+	var i atomic.Int64
+	i.Store(-1)
+	return func(V) int {
+		return int(i.Add(1))
+	}
 }
 
 // IterKV converts an iter.Seq[V] to an iter.Seq2[K, V]. The provided sequence is iterated over lazily when the returned
@@ -178,7 +179,7 @@ func IterV[K, V any](iter iter.Seq2[K, V]) iter.Seq[V] {
 func Max[T cmp.Ordered](seq iter.Seq[T]) (T, bool) {
 	var mt T
 	var value bool
-	for i, t := range IterIntV(seq) {
+	for i, t := range IterKV(seq, IntK[T]()) {
 		switch i {
 		case 0:
 			mt = t
@@ -194,7 +195,7 @@ func Max[T cmp.Ordered](seq iter.Seq[T]) (T, bool) {
 func MaxFunc[T any](seq iter.Seq[T], compare func(T, T) int) (T, bool) {
 	var mt T
 	var value bool
-	for i, t := range IterIntV(seq) {
+	for i, t := range IterKV(seq, IntK[T]()) {
 		switch i {
 		case 0:
 			mt = t
@@ -208,12 +209,33 @@ func MaxFunc[T any](seq iter.Seq[T], compare func(T, T) int) (T, bool) {
 	return mt, value
 }
 
+// MaxFuncKV is like [MaxFunc] but for key-value pairs. The provided sequence is iterated over before MaxFuncKV returns.
+func MaxFuncKV[K, V any](seq iter.Seq2[K, V], compare func(KV[K, V], KV[K, V]) int) (KV[K, V], bool) {
+	var mt KV[K, V]
+	var value bool
+	var i int
+	for k, v := range seq {
+		switch i {
+		case 0:
+			mt = KV[K, V]{K: k, V: v}
+			value = true
+		default:
+			t := KV[K, V]{K: k, V: v}
+			if compare(t, mt) > 0 {
+				mt = t
+			}
+		}
+		i++
+	}
+	return mt, value
+}
+
 // Min value from the sequence. Uses min built in to compare values. The second value is false if the sequence is empty. The
 // sequence is iterated over before Min returns.
 func Min[T cmp.Ordered](seq iter.Seq[T]) (T, bool) {
 	var mt T
 	var value bool
-	for i, t := range IterIntV(seq) {
+	for i, t := range IterKV(seq, IntK[T]()) {
 		switch i {
 		case 0:
 			mt = t
@@ -229,7 +251,7 @@ func Min[T cmp.Ordered](seq iter.Seq[T]) (T, bool) {
 func MinFunc[T any](seq iter.Seq[T], compare func(T, T) int) (T, bool) {
 	var mt T
 	var value bool
-	for i, t := range IterIntV(seq) {
+	for i, t := range IterKV(seq, IntK[T]()) {
 		switch i {
 		case 0:
 			mt = t
@@ -239,6 +261,27 @@ func MinFunc[T any](seq iter.Seq[T], compare func(T, T) int) (T, bool) {
 				mt = t
 			}
 		}
+	}
+	return mt, value
+}
+
+// MinFuncKV is like [MinFunc] but for key-value pairs. The provided sequence is iterated over before MinFuncKV returns.
+func MinFuncKV[K, V any](seq iter.Seq2[K, V], compare func(KV[K, V], KV[K, V]) int) (KV[K, V], bool) {
+	var mt KV[K, V]
+	var value bool
+	var i int
+	for k, v := range seq {
+		switch i {
+		case 0:
+			mt = KV[K, V]{K: k, V: v}
+			value = true
+		default:
+			t := KV[K, V]{K: k, V: v}
+			if compare(t, mt) < 0 {
+				mt = t
+			}
+		}
+		i++
 	}
 	return mt, value
 }
@@ -268,7 +311,7 @@ func ReduceKV[K, V, O any](seq iter.Seq2[K, V], initial O, fn func(agg O, k K, v
 func Compact[T comparable](seq iter.Seq[T]) iter.Seq[T] {
 	return func(yield func(T) bool) {
 		var prev T
-		for i, t := range IterIntV(seq) {
+		for i, t := range IterKV(seq, IntK[T]()) {
 			switch i {
 			case 0:
 				prev = t
@@ -293,7 +336,7 @@ func Compact[T comparable](seq iter.Seq[T]) iter.Seq[T] {
 func CompactFunc[T any](seq iter.Seq[T], equal func(T, T) bool) iter.Seq[T] {
 	return func(yield func(T) bool) {
 		var prev T
-		for i, t := range IterIntV(seq) {
+		for i, t := range IterKV(seq, IntK[T]()) {
 			switch i {
 			case 0:
 				prev = t
@@ -306,6 +349,41 @@ func CompactFunc[T any](seq iter.Seq[T], equal func(T, T) bool) iter.Seq[T] {
 					if !yield(t) {
 						return
 					}
+				}
+			}
+		}
+	}
+}
+
+// CompactKV returns an iterator that yields all key-value pairs that are not equal to the previous key-value pair. The provided
+// sequence is iterated over lazily when the returned sequence is iterated over.
+func CompactKV[K, V comparable](seq iter.Seq2[K, V]) iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		var prev KV[K, V]
+		for k, v := range seq {
+			if prev.K != k || prev.V != v {
+				prev.K = k
+				prev.V = v
+				if !yield(k, v) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// CompactKVFunc is like [CompactKV] but uses the function to compare key-value pairs. For runs of key-value pairs that compare
+// equal, CompactKVFunc only yields the first one. The provided sequence is iterated over lazily when the returned sequence is
+// iterated over.
+func CompactKVFunc[K, V any](seq iter.Seq2[K, V], equal func(KV[K, V], KV[K, V]) bool) iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		var prev KV[K, V]
+		for k, v := range seq {
+			if !equal(prev, KV[K, V]{K: k, V: v}) {
+				prev.K = k
+				prev.V = v
+				if !yield(k, v) {
+					return
 				}
 			}
 		}
@@ -328,6 +406,26 @@ func Chunk[T any](seq iter.Seq[T], size int) iter.Seq[iter.Seq[T]] {
 		}
 		if len(chunk) > 0 {
 			yield(With(chunk...))
+		}
+	}
+}
+
+// ChunkKV is like [Chunk] but for key-value pairs. The provided sequence is iterated over lazily when the returned sequence is
+// iterated over. The last chunk may have fewer than size elements.
+func ChunkKV[K, V any](seq iter.Seq2[K, V], size int) iter.Seq[iter.Seq2[K, V]] {
+	return func(yield func(iter.Seq2[K, V]) bool) {
+		var chunk []KV[K, V]
+		for k, v := range seq {
+			chunk = append(chunk, KV[K, V]{K: k, V: v})
+			if len(chunk) == size {
+				if !yield(WithKV(chunk...)) {
+					return
+				}
+				chunk = nil
+			}
+		}
+		if len(chunk) > 0 {
+			yield(WithKV(chunk...))
 		}
 	}
 }
@@ -377,10 +475,70 @@ func CompareFunc[T any](a, b iter.Seq[T], compare func(T, T) int) int {
 	return 0
 }
 
+// CompareKV is like [CompareKVFunc] but uses the cmp.Compare function to compare keys and values.
+func CompareKV[K, V cmp.Ordered](a, b iter.Seq2[K, V]) int {
+	return CompareKVFunc(a, b, func(a, b KV[K, V]) int {
+		if cmp.Compare(a.K, b.K) == 0 {
+			return cmp.Compare(a.V, b.V)
+		}
+		return cmp.Compare(a.K, b.K)
+	})
+}
+
+// CompareKVFunc compares the key-value pairs of a and b, using the compare func on each pair of key-value pairs. The key-value
+// pairs are compared sequentially, until one key-value pair is not equal to the other. The result of comparing the first
+// non-matching key-value pairs is returned. If both sequences are equal until one of them ends, the shorter sequence is
+// considered less than the longer one. The result is 0 if a == b, -1 if a < b, and +1 if a > b.
+func CompareKVFunc[AK, AV, BK, BV any](a iter.Seq2[AK, AV], b iter.Seq2[BK, BV], compare func(a KV[AK, AV], b KV[BK, BV]) int) int {
+	bvals := make(chan KV[BK, BV])
+	exit := make(chan struct{})
+	defer close(exit)
+
+	go func() {
+		defer close(bvals)
+		for k, v := range b {
+			select {
+			case bvals <- KV[BK, BV]{k, v}:
+			case <-exit:
+				return
+			}
+		}
+	}()
+
+	for ak, av := range a {
+		bv, ok := <-bvals
+		if !ok { // b is shorter than a
+			return 1
+		}
+		if c := compare(KV[AK, AV]{ak, av}, bv); c != 0 {
+			return c
+		}
+	}
+
+	// done with a, check if b is longer
+	// if bvals isn't closed b is longer than a
+	if _, ok := <-bvals; ok {
+		return -1
+	}
+
+	// a and b are equal
+	return 0
+}
+
 // Contains returns true if the value is in the sequence. The sequence is iterated over when Contains is called.
 func Contains[T comparable](seq iter.Seq[T], value T) bool {
 	for t := range seq {
 		if t == value {
+			return true
+		}
+	}
+	return false
+}
+
+// ContainsKV returns true if the key-value pair is in the sequence. The sequence is iterated over when ContainsKV is called.
+func ContainsKV[K, V comparable](seq iter.Seq2[K, V], key K, value V) bool {
+	for k, v := range seq {
+		if k == key && v == value {
 			return true
 		}
 	}
@@ -398,6 +556,17 @@ func ContainsFunc[T any](seq iter.Seq[T], equal func(T) bool) bool {
 	return false
 }
 
+// ContainsKVFunc returns true if the function returns true for any key-value pair in the sequence. The sequence is iterated over
+// when ContainsKVFunc is called.
+func ContainsKVFunc[K, V any](seq iter.Seq2[K, V], equal func(K, V) bool) bool {
+	for k, v := range seq {
+		if equal(k, v) {
+			return true
+		}
+	}
+	return false
+}
+
 // Equal returns true if the sequences are equal. The sequences are compared sequentially, until one element is not equal to
 // the other.
 func Equal[T comparable](a, b iter.Seq[T]) bool {
@@ -406,6 +575,20 @@ func Equal[T comparable](a, b iter.Seq[T]) bool {
 			return 0
 		}
 		return -1
+	}) == 0
+}
+
+// EqualKV returns true if the key-value pairs in the sequences are equal. The key-value pairs are compared sequentially, until
+// one key-value pair is not equal to the other.
+func EqualKV[K, V comparable](a, b iter.Seq2[K, V]) bool {
+	return CompareKVFunc(a, b, func(a, b KV[K, V]) int {
+		if a.K == b.K && a.V == b.V {
+			return 0
+		}
+		if a.K != b.K {
+			return -1
+		}
+		return 1
 	}) == 0
 }
 
@@ -419,11 +602,32 @@ func EqualFunc[T any](a, b iter.Seq[T], equal func(T, T) bool) bool {
 	}) == 0
 }
 
+// EqualKVFunc is like [EqualKV] but uses the function to compare key-value pairs.
+func EqualKVFunc[AK, AV, BK, BV any](a iter.Seq2[AK, AV], b iter.Seq2[BK, BV], equal func(a KV[AK, AV], b KV[BK, BV]) bool) bool {
+	return CompareKVFunc(a, b, func(a KV[AK, AV], b KV[BK, BV]) int {
+		if equal(a, b) {
+			return 0
+		}
+		return 1
+	}) == 0
+}
+
 // Repeat returns a sequence which repeats the value n times.
 func Repeat[T any](n int, t T) iter.Seq[T] {
 	return func(yield func(T) bool) {
 		for i := 0; i < n; i++ {
 			if !yield(t) {
+				return
+			}
+		}
+	}
+}
+
+// RepeatKV returns a sequence which repeats the key-value pair n times.
+func RepeatKV[K, V any](n int, k K, v V) iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		for i := 0; i < n; i++ {
+			if !yield(k, v) {
 				return
 			}
 		}
@@ -445,10 +649,27 @@ func Replace[T comparable](seq iter.Seq[T], old, new T) iter.Seq[T] {
 	}
 }
 
-// IsSorted returns true if the sequence is sorted. The provided sequence is iterated over before IsSorted returns.
+// ReplaceKV replaces the old key-value pair with the new key-value pair in the sequence. The provided sequence is iterated
+// over lazily when the returned sequence is iterated over.
+func ReplaceKV[K, V comparable](seq iter.Seq2[K, V], old KV[K, V], new KV[K, V]) iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		for k, v := range seq {
+			if k == old.K && v == old.V {
+				k = new.K
+				v = new.V
+			}
+			if !yield(k, v) {
+				return
+			}
+		}
+	}
+}
+
+// IsSorted returns true if the sequence is sorted. The provided sequence is iterated over before IsSorted returns. [cmp.Compare]
+// // is used to compare elements.
 func IsSorted[T cmp.Ordered](seq iter.Seq[T]) bool {
 	var prev T
-	for i, t := range IterIntV(seq) {
+	for i, t := range IterKV(seq, IntK[T]()) {
 		switch i {
 		case 0:
 			prev = t
@@ -458,6 +679,20 @@ func IsSorted[T cmp.Ordered](seq iter.Seq[T]) bool {
 			}
 			prev = t
 		}
+	}
+	return true
+}
+
+// IsSortedKV returns true if the sequence is sorted. The provided sequence is iterated over before IsSortedKV returns.
+// [cmp.Compare] is used to compare keys and values
+func IsSortedKV[K, V cmp.Ordered](seq iter.Seq2[K, V]) bool {
+	var prev KV[K, V]
+	for k, v := range seq {
+		if (cmp.Compare(k, prev.K) < 0) || (cmp.Compare(v, prev.V) < 0) {
+			return false
+		}
+		prev.K = k
+		prev.V = v
 	}
 	return true
 }
