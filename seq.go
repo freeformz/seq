@@ -2,8 +2,10 @@ package seq
 
 import (
 	"cmp"
+	"context"
 	"iter"
 	"sync/atomic"
+	"time"
 )
 
 // With returns a sequence with the provided values. The values are iterated over lazily when the returned sequence is iterated
@@ -40,6 +42,58 @@ func WithKV[K, V any](kv ...KV[K, V]) iter.Seq2[K, V] {
 			}
 		}
 	}
+}
+
+// FromChan returns a sequence that yields values from the provided channel. The sequence is iterated over lazily when the
+// returned sequence is iterated over. The sequence will end when the channel is closed.
+//
+// This allows for collecting values from a channel into a slice or similar relatively easily:
+//
+//	s := slices.Collect(FromChan(ch))
+//	// instead of
+//	var s []T
+//	for v := range ch {
+//		s = append(s, v)
+//	}
+func FromChan[T any](ch <-chan T) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		for t := range ch {
+			if !yield(t) {
+				return
+			}
+		}
+	}
+}
+
+// ToChan returns a channel that yields values from the provided sequence. The provided sequence is iterated over lazily when
+// the returned channel is iterated over. The channel is closed when the sequence is exhausted.
+func ToChan[T any](seq iter.Seq[T]) <-chan T {
+	ch := make(chan T)
+	go func() {
+		defer close(ch)
+		for t := range seq {
+			ch <- t
+		}
+	}()
+	return ch
+}
+
+// ToChanCtx returns a channel that yields values from the provided sequence. The provided sequence is iterated over
+// lazily when the returned channel is iterated over. The channel is closed when the sequence is exhausted or the
+// context is canceled, whichever comes first.
+func ToChanCtx[T any](ctx context.Context, seq iter.Seq[T]) <-chan T {
+	ch := make(chan T)
+	go func() {
+		defer close(ch)
+		for t := range seq {
+			select {
+			case ch <- t:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return ch
 }
 
 // Map the values in the sequence to a new sequence of values by applying the function fn to each value. Function application
@@ -545,22 +599,22 @@ func ContainsKV[K, V comparable](seq iter.Seq2[K, V], key K, value V) bool {
 	return false
 }
 
-// ContainsFunc returns true if the function returns true for any value in the sequence. The sequence is iterated over when
-// ContainsFunc is called.
-func ContainsFunc[T any](seq iter.Seq[T], equal func(T) bool) bool {
+// ContainsFunc returns true if the predicate function returns true for any value in the sequence. The sequence is
+// iterated over when ContainsFunc is called.
+func ContainsFunc[T any](seq iter.Seq[T], predicate func(T) bool) bool {
 	for t := range seq {
-		if equal(t) {
+		if predicate(t) {
 			return true
 		}
 	}
 	return false
 }
 
-// ContainsKVFunc returns true if the function returns true for any key-value pair in the sequence. The sequence is iterated over
-// when ContainsKVFunc is called.
-func ContainsKVFunc[K, V any](seq iter.Seq2[K, V], equal func(K, V) bool) bool {
+// ContainsKVFunc returns true if the predicate function returns true for any key-value pair in the sequence. The
+// sequence is iterated over when ContainsKVFunc is called.
+func ContainsKVFunc[K, V any](seq iter.Seq2[K, V], predicate func(K, V) bool) bool {
 	for k, v := range seq {
-		if equal(k, v) {
+		if predicate(k, v) {
 			return true
 		}
 	}
@@ -695,4 +749,247 @@ func IsSortedKV[K, V cmp.Ordered](seq iter.Seq2[K, V]) bool {
 		prev.V = v
 	}
 	return true
+}
+
+// Coalesce returns the first non zero value in the sequence. The provided sequence is iterated over before Coalesce
+// returns. If no non-zero value is found, the second return value is false.
+func Coalesce[T comparable](seq iter.Seq[T]) (T, bool) {
+	var value T
+	var found bool
+	for t := range seq {
+		if t != value {
+			return t, true
+		}
+	}
+	return value, found
+}
+
+// CoalesceKV returns the first key-value pair in the sequence whose value is non zero. The provided sequence is
+// iterated over before CoalesceKV returns. If no non-zero value is found, the second return value is false.
+func CoalesceKV[K, V comparable](seq iter.Seq2[K, V]) (KV[K, V], bool) {
+	var value V
+	var found bool
+	for k, v := range seq {
+		if v != value {
+			return KV[K, V]{K: k, V: v}, true
+		}
+	}
+	return KV[K, V]{}, found
+}
+
+// Count returns the number of elements in the sequence. The sequence is iterated over before Count returns.
+func Count[T any](seq iter.Seq[T]) int {
+	var count int
+	for range seq {
+		count++
+	}
+	return count
+}
+
+// CountKV returns the number of key-value pairs in the sequence. The sequence is iterated over before CountKV returns.
+func CountKV[K, V any](seq iter.Seq2[K, V]) int {
+	var count int
+	for range seq {
+		count++
+	}
+	return count
+}
+
+// CountBy returns the number of elements in the sequence for which the function returns true. The sequence is iterated over
+// before CountBy returns.
+func CountBy[T any](seq iter.Seq[T], fn func(T) bool) int {
+	var count int
+	for t := range seq {
+		if fn(t) {
+			count++
+		}
+	}
+	return count
+}
+
+// CountKVBy returns the number of key-value pairs in the sequence for which the function returns true. The sequence is
+// iterated over before CountKVBy returns.
+func CountKVBy[K, V any](seq iter.Seq2[K, V], fn func(K, V) bool) int {
+	var count int
+	for k, v := range seq {
+		if fn(k, v) {
+			count++
+		}
+	}
+	return count
+}
+
+// CountValues returns a key-value sequence where the keys are the values in the original sequence and the values are
+// the number of times that value appears in the original sequence. The returned key-value sequence is unordered. The
+// provided sequence is iterated over before CountValues returns.
+func CountValues[T comparable](seq iter.Seq[T]) iter.Seq2[T, int] {
+	m := make(map[T]int)
+	for t := range seq {
+		m[t]++
+	}
+	return func(yield func(T, int) bool) {
+		for k, v := range m {
+			if !yield(k, v) {
+				return
+			}
+		}
+	}
+}
+
+// Drop n elements from the starts of the sequence. The provided sequence is iterated over lazily when the returned
+// sequence is iterated over.
+func Drop[T any](seq iter.Seq[T], n int) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		for i, t := range IterKV(seq, IntK[T]()) {
+			if i < n {
+				continue
+			}
+			if !yield(t) {
+				return
+			}
+		}
+	}
+}
+
+// DropKV n key-value pairs from the starts of the sequence. The provided sequence is iterated over lazily when the returned
+// sequence is iterated over.
+func DropKV[K, V any](seq iter.Seq2[K, V], n int) iter.Seq2[K, V] {
+	i := -1
+	return func(yield func(K, V) bool) {
+		for k, v := range seq {
+			i++
+			if i < n {
+				continue
+			}
+			if !yield(k, v) {
+				return
+			}
+		}
+	}
+}
+
+// DropBy returns a sequence with all elements for which the function returns true removed. The provided sequence is
+// iterated over lazily when the returned sequence is iterated over. This is the opposite of Filter.
+func DropBy[T any](seq iter.Seq[T], fn func(T) bool) iter.Seq[T] {
+	return Filter(seq, func(t T) bool {
+		return !fn(t)
+	})
+}
+
+// DropKVBy returns a sequence with all key-value pairs for which the function returns true removed. The provided sequence
+// is iterated over lazily when the returned sequence is iterated over. This is the opposite of FilterKV.
+func DropKVBy[K, V any](seq iter.Seq2[K, V], fn func(K, V) bool) iter.Seq2[K, V] {
+	return FilterKV(seq, func(k K, v V) bool {
+		return !fn(k, v)
+	})
+}
+
+// EveryUntil returns a sequence that yields the time every d duration until the provided time. The ticker will adjust
+// the time interval or drop ticks to make up for slow iteratee. The duration d must be greater than zero; if not,
+// the function will panic. Waits d long before yielding the first element.
+func EveryUntil(d time.Duration, until time.Time) iter.Seq[time.Time] {
+	return func(yield func(time.Time) bool) {
+		for now := range time.Tick(d) {
+			if now.After(until) {
+				return
+			}
+			if !yield(now) {
+				return
+			}
+			if now.After(until) {
+				return
+			}
+		}
+	}
+}
+
+// EveryN returns a sequence that yields the time every d duration n times. The ticker will adjust the time interval or
+// drop ticks to make up for slow iteratee. The duration d must be greater than zero; if not, the function will panic.
+// Waits d long before yielding the first element.
+func EveryN(d time.Duration, times int) iter.Seq[time.Time] {
+	return func(yield func(time.Time) bool) {
+		if times == 0 {
+			return
+		}
+		for now := range time.Tick(d) {
+			if !yield(now) {
+				return
+			}
+			times--
+			if times == 0 {
+				return
+			}
+		}
+	}
+}
+
+// MapToKV maps the values in the sequence to a new sequence of key-value pairs by applying the function fn to each value. Function
+// application happens lazily when the returned sequence is iterated over.
+func MapToKV[T, K, V any](seq iter.Seq[T], fn func(T) (K, V)) iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		for t := range seq {
+			k, v := fn(t)
+			if !yield(k, v) {
+				return
+			}
+		}
+	}
+}
+
+// Find returns the index of the first occurrence of the value in the sequence, the "index" (0 based) of the value, and true. If
+// the value is not found, the first return value is the length of the sequence, the second return value is false. The provided
+// sequence is iterated over when Find is called.
+func Find[T comparable](seq iter.Seq[T], value T) (int, bool) {
+	var i int
+	var t T
+	for i, t = range IterKV(seq, IntK[T]()) {
+		if t == value {
+			return i, true
+		}
+	}
+	return i + 1, false
+}
+
+// FindBy returns the first value in the sequence for which the function returns true, the "index" (0) based) of the
+// value, and true. If no value is found, the first return value is the zero value of the type, the second return value
+// is the length of the sequence, and the third return value is false. The provided sequence is iterated over when FindBy is called.
+func FindBy[T any](seq iter.Seq[T], fn func(T) bool) (T, int, bool) {
+	var i int
+	var t T
+	for i, t = range IterKV(seq, IntK[T]()) {
+		if fn(t) {
+			return t, i, true
+		}
+	}
+	var z T
+	return z, i + 1, false
+}
+
+// FindByKey returns the value of the first key-value pair in the sequence for which the function returns true, the
+// "index" (0 based) of the value, and true. If the key is not found, the first return value is the zero value of the
+// value type, the second return value is the length of the sequence, and the third return value is false. The provided
+// sequence is iterated over when FindByKey is called.
+func FindByKey[K comparable, V any](seq iter.Seq2[K, V], key K) (V, int, bool) {
+	var i int
+	for k, v := range seq {
+		if k == key {
+			return v, i, true
+		}
+		i++
+	}
+	var v V
+	return v, i, false
+}
+
+// FindByValue is like FindByKey, but returns the key of the first key-value pair whose value is equal to the provided value.
+func FindByValue[K comparable, V comparable](seq iter.Seq2[K, V], value V) (K, int, bool) {
+	var i int
+	for k, v := range seq {
+		if v == value {
+			return k, i, true
+		}
+		i++
+	}
+	var k K
+	return k, i, false
 }

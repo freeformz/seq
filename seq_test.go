@@ -1,10 +1,12 @@
 package seq
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func ExampleWith() {
@@ -33,6 +35,7 @@ func ExampleWithKV() {
 	// b 2
 	// c 3
 }
+
 func ExampleMap() {
 	i := With(1, 2, 3)
 
@@ -703,6 +706,18 @@ func ExampleRepeat() {
 	// hi
 }
 
+func ExampleRepeatKV() {
+	i := RepeatKV(3, "a", 1)
+	for k, v := range i {
+		fmt.Println(k, v)
+	}
+
+	// Output:
+	// a 1
+	// a 1
+	// a 1
+}
+
 func ExampleReplace() {
 	i := With(1, 2, 3, 4, 5)
 
@@ -766,4 +781,310 @@ func ExampleIsSortedKV() {
 	// true
 	// false
 	// false
+}
+
+func ExampleFromChan() {
+	values := make(chan int, 3)
+	go func() {
+		for i := range 10 {
+			values <- i
+		}
+		close(values)
+	}()
+
+	vals := slices.Collect(FromChan(values))
+	fmt.Println(vals)
+
+	// Output:
+	// [0 1 2 3 4 5 6 7 8 9]
+}
+
+func ExampleToChan() {
+	i := With(1, 2, 3, 4, 5)
+	ch := ToChan(i)
+
+	for v := range ch {
+		fmt.Println(v)
+	}
+
+	// Output:
+	// 1
+	// 2
+	// 3
+	// 4
+	// 5
+}
+
+func ExampleToChanCtx() {
+	i := With(1, 2, 3, 4, 5)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := ToChanCtx(ctx, i)
+
+	for v := range ch {
+		fmt.Println(v)
+		if v == 3 {
+			cancel()
+		}
+	}
+
+	// Output:
+	// 1
+	// 2
+	// 3
+}
+
+func ExampleCoalesce() {
+	i := With(0, 0, 4, 5)
+
+	fmt.Println(Coalesce(i))
+
+	// Output:
+	// 4 true
+}
+
+func ExampleCoalesceKV() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 0}, tKV{K: "b", V: 0}, tKV{K: "c", V: 4}, tKV{K: "d", V: 5})
+
+	fmt.Println(CoalesceKV(i))
+
+	// Output:
+	// {c 4} true
+}
+
+func ExampleCount() {
+	i := With(1, 2, 3, 4)
+
+	fmt.Println(Count(i))
+
+	// Output:
+	// 4
+}
+
+func ExampleCountKV() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+
+	fmt.Println(CountKV(i))
+
+	// Output:
+	// 3
+}
+
+func ExampleCountBy() {
+	i := With(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+
+	fmt.Println(CountBy(i, func(v int) bool {
+		return v%2 == 0
+	}))
+
+	// Output:
+	// 5
+}
+
+func ExampleCountKVBy() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+
+	fmt.Println(CountKVBy(i, func(k string, v int) bool {
+		return v%2 == 0
+	}))
+
+	// Output:
+	// 1
+}
+
+func ExampleCountValues() {
+	i := With(1, 1, 2, 2, 3, 3, 3, 4)
+
+	for k, v := range CountValues(i) {
+		fmt.Printf("%d: %v\n", k, v)
+	}
+
+	// Unordered output:
+	// 1: 2
+	// 2: 2
+	// 3: 3
+	// 4: 1
+}
+
+func ExampleDrop() {
+	i := With(1, 2, 3, 4, 5)
+
+	for v := range Drop(i, 2) {
+		fmt.Println(v)
+	}
+
+	for v := range Drop(i, 0) {
+		fmt.Println(v)
+	}
+
+	// doesn't print anything
+	for v := range Drop(i, 100) {
+		fmt.Println(v)
+	}
+
+	// Output:
+	// 3
+	// 4
+	// 5
+	// 1
+	// 2
+	// 3
+	// 4
+	// 5
+}
+
+func ExampleDropKV() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+
+	for k, v := range DropKV(i, 2) {
+		fmt.Println(k, v)
+	}
+
+	for k, v := range DropKV(i, 0) {
+		fmt.Println(k, v)
+	}
+
+	// doesn't print anything
+	for k, v := range DropKV(i, 100) {
+		fmt.Println(k, v)
+	}
+
+	// Output:
+	// c 3
+	// a 1
+	// b 2
+	// c 3
+}
+
+func ExampleDropBy() {
+	i := With(1, 2, 3, 4, 5, 6, 7, 8, 9)
+
+	s := DropBy(i, func(v int) bool {
+		return v%2 == 0
+	})
+
+	fmt.Println(slices.Collect(s))
+
+	// Output:
+	// [1 3 5 7 9]
+}
+
+func ExampleDropKVBy() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+
+	s := DropKVBy(i, func(k string, v int) bool {
+		return v%2 == 0
+	})
+
+	for k, v := range s {
+		fmt.Println(k, v)
+	}
+
+	// Output:
+	// a 1
+	// c 3
+}
+
+func ExampleEveryUntil() {
+	var i int
+	for t := range EveryUntil(time.Millisecond, time.Now().Add(10*time.Millisecond)) {
+		_ = t // 2025-03-23 18:53:05.064589166 -0700 PDT m=+0.007687209
+		i++
+	}
+
+	fmt.Println(i)
+
+	// Output:
+	// 9
+}
+
+func ExampleEveryN() {
+	var i int
+	for t := range EveryN(time.Millisecond, 10) {
+		_ = t // 2025-03-23 18:53:05.064589166 -0700 PDT m=+0.007687209
+		i++
+	}
+
+	fmt.Println(i)
+
+	// Output:
+	// 10
+}
+
+func ExampleMapToKV() {
+	i := With(1, 2, 3)
+
+	for k, v := range MapToKV(i, func(i int) (string, int) {
+		return string([]byte{byte(64 + i)}), i
+	}) {
+		fmt.Println(k, v)
+	}
+
+	// Output:
+	// A 1
+	// B 2
+	// C 3
+}
+
+func ExampleFind() {
+	i := With(1, 2, 3, 4, 5)
+
+	fmt.Println(Find(i, 3))
+
+	fmt.Println(Find(i, 6))
+
+	// Output:
+	// 2 true
+	// 5 false
+}
+
+func ExampleFindBy() {
+	i := With(1, 2, 3, 4, 5)
+
+	v, idx, ok := FindBy(i, func(v int) bool {
+		return v == 3
+	})
+
+	fmt.Println(v, idx, ok)
+
+	v, idx, ok = FindBy(i, func(v int) bool {
+		return v == 6
+	})
+
+	fmt.Println(v, idx, ok)
+
+	// Output:
+	// 3 2 true
+	// 0 5 false
+}
+
+func ExampleFindByKey() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+
+	fmt.Println(FindByKey(i, "b"))
+
+	fmt.Println(FindByKey(i, "d"))
+
+	// Output:
+	// 2 1 true
+	// 0 3 false
+}
+
+func ExampleFindByValue() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+
+	fmt.Println(FindByValue(i, 2))
+
+	fmt.Println(FindByValue(i, 4))
+
+	// Output:
+	// b 1 true
+	//  3 false
 }
