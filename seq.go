@@ -87,9 +87,14 @@ func ToChanCtx[T any](ctx context.Context, seq iter.Seq[T]) <-chan T {
 		defer close(ch)
 		for t := range seq {
 			select {
-			case ch <- t:
 			case <-ctx.Done():
 				return
+			default:
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- t:
 			}
 		}
 	}()
