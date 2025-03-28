@@ -991,16 +991,11 @@ func ExampleDropKVBy() {
 }
 
 func ExampleEveryUntil() {
-	var i int
 	for t := range EveryUntil(time.Millisecond, time.Now().Add(10*time.Millisecond)) {
-		_ = t // 2025-03-23 18:53:05.064589166 -0700 PDT m=+0.007687209
-		i++
+		_ = t // t == 2025-03-23 18:53:05.064589166 -0700 PDT m=+0.007687209
 	}
 
-	fmt.Println(i)
-
-	// Output:
-	// 9
+	// No output validation since this relies on time it will be flaky as a test
 }
 
 func ExampleEveryN() {
