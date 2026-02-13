@@ -1092,6 +1092,14 @@ func ExampleAtKV_negative() {
 	//  0 false
 }
 
+func ExampleAtKV_empty() {
+	i := WithKV[string, int]()
+
+	fmt.Println(AtKV(i, 0))
+
+	// Output:
+	//  0 false
+}
 func ExampleFind() {
 	i := With(1, 2, 3, 4, 5)
 
