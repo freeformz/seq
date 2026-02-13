@@ -27,4 +27,4 @@ go install honnef.co/go/tools/cmd/staticcheck@latest && staticcheck ./...
 
 **Testing**: All tests are `Example` functions — they serve as both documentation and regression tests. No traditional unit tests. Run a single example with `go test -run ExampleFunctionName`.
 
-**Commit tags**: Commit messages use `#patch`, `#minor`, `#major`, or `#none` suffixes for automated semantic version bumping.
+**Commit tags**: Commit messages use `#patch`, `#minor`, `#major`, or `#none` suffixes for automated semantic version bumping. Changing the Go version in `go.mod` should use `#minor`.

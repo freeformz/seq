@@ -941,6 +941,49 @@ func MapToKV[T, K, V any](seq iter.Seq[T], fn func(T) (K, V)) iter.Seq2[K, V] {
 	}
 }
 
+// At returns the value at the given 0-based index in the sequence and true. If
+// the index is out of range (negative or beyond sequence length), it returns
+// the zero value and false. The provided sequence is iterated over up to and
+// including the target index when At is called.
+func At[T any](seq iter.Seq[T], index int) (T, bool) {
+	if index < 0 {
+		var z T
+		return z, false
+	}
+	var i int
+	for v := range seq {
+		if i == index {
+			return v, true
+		}
+		i++
+	}
+	var z T
+	return z, false
+}
+
+// AtKV returns the key and value at the given 0-based index in the sequence and true. If
+// the index is out of range (negative or beyond sequence length), it returns
+// the zero values and false. The provided sequence is iterated over up to and
+// including the target index when AtKV is called. To find a value by key, use
+// FindByKey instead.
+func AtKV[K any, V any](seq iter.Seq2[K, V], index int) (K, V, bool) {
+	if index < 0 {
+		var zk K
+		var zv V
+		return zk, zv, false
+	}
+	var i int
+	for k, v := range seq {
+		if i == index {
+			return k, v, true
+		}
+		i++
+	}
+	var zk K
+	var zv V
+	return zk, zv, false
+}
+
 // Find returns the index of the first occurrence of the value in the sequence, the "index" (0 based) of the value, and true. If
 // the value is not found, the first return value is the length of the sequence, the second return value is false. The provided
 // sequence is iterated over when Find is called.

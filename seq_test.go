@@ -1026,6 +1026,72 @@ func ExampleMapToKV() {
 	// C 3
 }
 
+func ExampleAt() {
+	i := With(1, 2, 3, 4, 5)
+
+	fmt.Println(At(i, 2))
+
+	// Output:
+	// 3 true
+}
+
+func ExampleAt_outOfRange() {
+	i := With(1, 2, 3)
+
+	fmt.Println(At(i, 5))
+
+	// Output:
+	// 0 false
+}
+
+func ExampleAt_empty() {
+	i := With[int]()
+
+	fmt.Println(At(i, 0))
+
+	// Output:
+	// 0 false
+}
+
+func ExampleAt_negative() {
+	i := With(1, 2, 3)
+
+	fmt.Println(At(i, -1))
+
+	// Output:
+	// 0 false
+}
+
+func ExampleAtKV() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+
+	fmt.Println(AtKV(i, 1))
+
+	// Output:
+	// b 2 true
+}
+
+func ExampleAtKV_outOfRange() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2})
+
+	fmt.Println(AtKV(i, 5))
+
+	// Output:
+	//  0 false
+}
+
+func ExampleAtKV_negative() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2})
+
+	fmt.Println(AtKV(i, -1))
+
+	// Output:
+	//  0 false
+}
+
 func ExampleFind() {
 	i := With(1, 2, 3, 4, 5)
 
