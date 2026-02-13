@@ -122,6 +122,8 @@ Golang's "missing" iterator/sequence functions.
 * `FindBy(iter.Seq[T], func(T) bool) (T, int, bool)`: Returns the first value for which the function returns true
 * `FindByKey(iter.Seq2[K,V], K) (V, int, bool)`: Returns the value of the first key-value pair with the given key
 * `FindByValue(iter.Seq2[K,V], V) (K, int, bool)`: Returns the key of the first key-value pair with the given value
+* `At(iter.Seq[T], int) (T, bool)`: Returns the value at the given 0-based index, or zero value and false if out of range
+* `AtKV(iter.Seq2[K,V], int) (K, V, bool)`: Returns the key and value at the given 0-based index, or zero values and false if out of range
 
 ## Utility Functions
 
