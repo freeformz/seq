@@ -457,7 +457,7 @@ func CompactKVFunc[K, V any](seq iter.Seq2[K, V], equal func(KV[K, V], KV[K, V])
 // over. The last chunk may have fewer than size elements. The size must be at least 1; if not, the function will panic.
 func Chunk[T any](seq iter.Seq[T], size int) iter.Seq[iter.Seq[T]] {
 	if size < 1 {
-		panic("seq: chunk size must be at least 1")
+		panic("seq: Chunk size must be at least 1")
 	}
 	return func(yield func(iter.Seq[T]) bool) {
 		var chunk []T
@@ -480,7 +480,7 @@ func Chunk[T any](seq iter.Seq[T], size int) iter.Seq[iter.Seq[T]] {
 // iterated over. The last chunk may have fewer than size elements. The size must be at least 1; if not, the function will panic.
 func ChunkKV[K, V any](seq iter.Seq2[K, V], size int) iter.Seq[iter.Seq2[K, V]] {
 	if size < 1 {
-		panic("seq: chunk size must be at least 1")
+		panic("seq: ChunkKV size must be at least 1")
 	}
 	return func(yield func(iter.Seq2[K, V]) bool) {
 		var chunk []KV[K, V]
@@ -752,8 +752,9 @@ func IsSorted[T cmp.Ordered](seq iter.Seq[T]) bool {
 	return true
 }
 
-// IsSortedKV returns true if the sequence is sorted. The provided sequence is iterated over before IsSortedKV returns.
-// [cmp.Compare] is used to compare keys and values
+// IsSortedKV returns true if the sequence is sorted. The keys and values are each compared independently with
+// [cmp.Compare]: both the keys and the values must be non-decreasing. Note this is stricter than the lexicographic
+// (key, then value) ordering used by [CompareKV]. The provided sequence is iterated over before IsSortedKV returns.
 func IsSortedKV[K, V cmp.Ordered](seq iter.Seq2[K, V]) bool {
 	var prev KV[K, V]
 	first := true
@@ -906,7 +907,7 @@ func DropKVBy[K, V any](seq iter.Seq2[K, V], fn func(K, V) bool) iter.Seq2[K, V]
 // the function will panic. Waits d long before yielding the first element.
 func EveryUntil(d time.Duration, until time.Time) iter.Seq[time.Time] {
 	if d <= 0 {
-		panic("seq: non-positive interval for EveryUntil")
+		panic("seq: EveryUntil interval must be positive")
 	}
 	return func(yield func(time.Time) bool) {
 		for now := range time.Tick(d) {
@@ -928,7 +929,7 @@ func EveryUntil(d time.Duration, until time.Time) iter.Seq[time.Time] {
 // Waits d long before yielding the first element. If times is not positive, the sequence is empty.
 func EveryN(d time.Duration, times int) iter.Seq[time.Time] {
 	if d <= 0 {
-		panic("seq: non-positive interval for EveryN")
+		panic("seq: EveryN interval must be positive")
 	}
 	return func(yield func(time.Time) bool) {
 		if times <= 0 {

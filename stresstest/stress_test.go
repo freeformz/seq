@@ -8,6 +8,7 @@ import (
 	"iter"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ func mustPanic(t *testing.T, name string, fn func()) {
 }
 
 // withTimeout fails the test if fn does not return within d. Guards against regressions that hang forever (e.g.
-// ranging over a nil channel).
+// ranging over a nil channel). On timeout the fn goroutine is abandoned, so fn must not use t.
 func withTimeout(t *testing.T, d time.Duration, fn func()) {
 	t.Helper()
 	done := make(chan struct{})
@@ -34,9 +35,11 @@ func withTimeout(t *testing.T, d time.Duration, fn func()) {
 		defer close(done)
 		fn()
 	}()
+	timer := time.NewTimer(d)
+	defer timer.Stop()
 	select {
 	case <-done:
-	case <-time.After(d):
+	case <-timer.C:
 		t.Fatal("timed out")
 	}
 }
@@ -68,12 +71,16 @@ func TestEveryNPanicsOnNonPositiveDuration(t *testing.T) {
 func TestEveryNNonPositiveTimesIsEmpty(t *testing.T) {
 	// Regression: a negative times used to decrement past zero and tick forever.
 	for _, times := range []int{0, -1, -100} {
+		var yielded atomic.Bool
 		withTimeout(t, 5*time.Second, func() {
 			for range seq.EveryN(time.Millisecond, times) {
-				t.Errorf("EveryN(_, %d) yielded a value; want empty sequence", times)
+				yielded.Store(true)
 				return
 			}
 		})
+		if yielded.Load() {
+			t.Errorf("EveryN(_, %d) yielded a value; want empty sequence", times)
+		}
 	}
 }
 
