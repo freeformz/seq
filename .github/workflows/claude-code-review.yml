@@ -31,6 +31,16 @@ jobs:
         with:
           fetch-depth: 1
 
+      # Give the reviewer a real Go toolchain so it can build, test, vet, and
+      # staticcheck the PR rather than trusting the description.
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
       - name: Run Claude Code Review
         id: claude-review
         uses: anthropics/claude-code-action@v1
@@ -39,6 +49,10 @@ jobs:
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          # --allowedTools is additive: it grants these Bash prefixes on top of
+          # the read-only tools the review plugin already has. Keep it scoped to
+          # the Go dev commands so the reviewer can actually verify the change.
+          claude_args: '--allowedTools "Bash(go test:*),Bash(go vet:*),Bash(go build:*),Bash(go run:*),Bash(gofmt:*),Bash(staticcheck:*)"'
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 

@@ -238,12 +238,11 @@ func IterV[K, V any](iter iter.Seq2[K, V]) iter.Seq[V] {
 func Max[T cmp.Ordered](seq iter.Seq[T]) (T, bool) {
 	var mt T
 	var value bool
-	for i, t := range IterKV(seq, IntK[T]()) {
-		switch i {
-		case 0:
+	for t := range seq {
+		if !value {
 			mt = t
 			value = true
-		default:
+		} else {
 			mt = max(t, mt)
 		}
 	}
@@ -254,15 +253,12 @@ func Max[T cmp.Ordered](seq iter.Seq[T]) (T, bool) {
 func MaxFunc[T any](seq iter.Seq[T], compare func(T, T) int) (T, bool) {
 	var mt T
 	var value bool
-	for i, t := range IterKV(seq, IntK[T]()) {
-		switch i {
-		case 0:
+	for t := range seq {
+		if !value {
 			mt = t
 			value = true
-		default:
-			if compare(t, mt) > 0 {
-				mt = t
-			}
+		} else if compare(t, mt) > 0 {
+			mt = t
 		}
 	}
 	return mt, value
@@ -294,12 +290,11 @@ func MaxFuncKV[K, V any](seq iter.Seq2[K, V], compare func(KV[K, V], KV[K, V]) i
 func Min[T cmp.Ordered](seq iter.Seq[T]) (T, bool) {
 	var mt T
 	var value bool
-	for i, t := range IterKV(seq, IntK[T]()) {
-		switch i {
-		case 0:
+	for t := range seq {
+		if !value {
 			mt = t
 			value = true
-		default:
+		} else {
 			mt = min(t, mt)
 		}
 	}
@@ -310,15 +305,12 @@ func Min[T cmp.Ordered](seq iter.Seq[T]) (T, bool) {
 func MinFunc[T any](seq iter.Seq[T], compare func(T, T) int) (T, bool) {
 	var mt T
 	var value bool
-	for i, t := range IterKV(seq, IntK[T]()) {
-		switch i {
-		case 0:
+	for t := range seq {
+		if !value {
 			mt = t
 			value = true
-		default:
-			if compare(t, mt) < 0 {
-				mt = t
-			}
+		} else if compare(t, mt) < 0 {
+			mt = t
 		}
 	}
 	return mt, value
@@ -370,19 +362,13 @@ func ReduceKV[K, V, O any](seq iter.Seq2[K, V], initial O, fn func(agg O, k K, v
 func Compact[T comparable](seq iter.Seq[T]) iter.Seq[T] {
 	return func(yield func(T) bool) {
 		var prev T
-		for i, t := range IterKV(seq, IntK[T]()) {
-			switch i {
-			case 0:
+		first := true
+		for t := range seq {
+			if first || prev != t {
+				first = false
 				prev = t
 				if !yield(t) {
 					return
-				}
-			default:
-				if prev != t {
-					prev = t
-					if !yield(t) {
-						return
-					}
 				}
 			}
 		}
@@ -395,19 +381,13 @@ func Compact[T comparable](seq iter.Seq[T]) iter.Seq[T] {
 func CompactFunc[T any](seq iter.Seq[T], equal func(T, T) bool) iter.Seq[T] {
 	return func(yield func(T) bool) {
 		var prev T
-		for i, t := range IterKV(seq, IntK[T]()) {
-			switch i {
-			case 0:
+		first := true
+		for t := range seq {
+			if first || !equal(prev, t) {
+				first = false
 				prev = t
 				if !yield(t) {
 					return
-				}
-			default:
-				if !equal(prev, t) {
-					prev = t
-					if !yield(t) {
-						return
-					}
 				}
 			}
 		}
@@ -461,9 +441,16 @@ func Chunk[T any](seq iter.Seq[T], size int) iter.Seq[iter.Seq[T]] {
 	}
 	return func(yield func(iter.Seq[T]) bool) {
 		var chunk []T
+		// The first chunk grows via append so a sequence shorter than size never
+		// over-allocates; once a chunk has filled, later ones preallocate exactly size.
+		full := false
 		for t := range seq {
+			if chunk == nil && full {
+				chunk = make([]T, 0, size)
+			}
 			chunk = append(chunk, t)
 			if len(chunk) == size {
+				full = true
 				if !yield(With(chunk...)) {
 					return
 				}
@@ -484,9 +471,16 @@ func ChunkKV[K, V any](seq iter.Seq2[K, V], size int) iter.Seq[iter.Seq2[K, V]] 
 	}
 	return func(yield func(iter.Seq2[K, V]) bool) {
 		var chunk []KV[K, V]
+		// The first chunk grows via append so a sequence shorter than size never
+		// over-allocates; once a chunk has filled, later ones preallocate exactly size.
+		full := false
 		for k, v := range seq {
+			if chunk == nil && full {
+				chunk = make([]KV[K, V], 0, size)
+			}
 			chunk = append(chunk, KV[K, V]{K: k, V: v})
 			if len(chunk) == size {
+				full = true
 				if !yield(WithKV(chunk...)) {
 					return
 				}
@@ -509,23 +503,11 @@ func Compare[T cmp.Ordered](a, b iter.Seq[T]) int {
 // elements is returned. If both sequences are equal until one of them ends, the shorter sequence is considered less
 // than the longer one. The result is 0 if a == b, -1 if a < b, and +1 if a > b.
 func CompareFunc[T any](a, b iter.Seq[T], compare func(T, T) int) int {
-	bvals := make(chan T)
-	exit := make(chan struct{})
-	defer close(exit)
-
-	go func() {
-		defer close(bvals)
-		for v := range b {
-			select {
-			case bvals <- v:
-			case <-exit:
-				return
-			}
-		}
-	}()
+	next, stop := iter.Pull(b)
+	defer stop()
 
 	for av := range a {
-		bv, ok := <-bvals
+		bv, ok := next()
 		if !ok { // b is shorter than a
 			return 1
 		}
@@ -535,8 +517,7 @@ func CompareFunc[T any](a, b iter.Seq[T], compare func(T, T) int) int {
 	}
 
 	// done with a, check if b is longer
-	// if bvals isn't closed b is longer than a
-	if _, ok := <-bvals; ok {
+	if _, ok := next(); ok {
 		return -1
 	}
 
@@ -559,34 +540,21 @@ func CompareKV[K, V cmp.Ordered](a, b iter.Seq2[K, V]) int {
 // non-matching key-value pairs is returned. If both sequences are equal until one of them ends, the shorter sequence is
 // considered less than the longer one. The result is 0 if a == b, -1 if a < b, and +1 if a > b.
 func CompareKVFunc[AK, AV, BK, BV any](a iter.Seq2[AK, AV], b iter.Seq2[BK, BV], compare func(a KV[AK, AV], b KV[BK, BV]) int) int {
-	bvals := make(chan KV[BK, BV])
-	exit := make(chan struct{})
-	defer close(exit)
-
-	go func() {
-		defer close(bvals)
-		for k, v := range b {
-			select {
-			case bvals <- KV[BK, BV]{k, v}:
-			case <-exit:
-				return
-			}
-		}
-	}()
+	next, stop := iter.Pull2(b)
+	defer stop()
 
 	for ak, av := range a {
-		bv, ok := <-bvals
+		bk, bv, ok := next()
 		if !ok { // b is shorter than a
 			return 1
 		}
-		if c := compare(KV[AK, AV]{ak, av}, bv); c != 0 {
+		if c := compare(KV[AK, AV]{K: ak, V: av}, KV[BK, BV]{K: bk, V: bv}); c != 0 {
 			return c
 		}
 	}
 
 	// done with a, check if b is longer
-	// if bvals isn't closed b is longer than a
-	if _, ok := <-bvals; ok {
+	if _, _, ok := next(); ok {
 		return -1
 	}
 
@@ -734,20 +702,17 @@ func ReplaceKV[K, V comparable](seq iter.Seq2[K, V], old KV[K, V], new KV[K, V])
 	}
 }
 
-// IsSorted returns true if the sequence is sorted. The provided sequence is iterated over before IsSorted returns. [cmp.Compare]
-// // is used to compare elements.
+// IsSorted returns true if the sequence is sorted. The provided sequence is iterated over before IsSorted returns.
+// [cmp.Compare] is used to compare elements.
 func IsSorted[T cmp.Ordered](seq iter.Seq[T]) bool {
 	var prev T
-	for i, t := range IterKV(seq, IntK[T]()) {
-		switch i {
-		case 0:
-			prev = t
-		default:
-			if cmp.Compare(t, prev) < 0 {
-				return false
-			}
-			prev = t
+	first := true
+	for t := range seq {
+		if !first && cmp.Compare(t, prev) < 0 {
+			return false
 		}
+		first = false
+		prev = t
 	}
 	return true
 }
@@ -858,7 +823,9 @@ func CountValues[T comparable](seq iter.Seq[T]) iter.Seq2[T, int] {
 // sequence is iterated over.
 func Drop[T any](seq iter.Seq[T], n int) iter.Seq[T] {
 	return func(yield func(T) bool) {
-		for i, t := range IterKV(seq, IntK[T]()) {
+		i := -1
+		for t := range seq {
+			i++
 			if i < n {
 				continue
 			}
