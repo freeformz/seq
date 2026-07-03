@@ -193,3 +193,40 @@ func TestToChanCtxCancelClosesChannel(t *testing.T) {
 		}
 	})
 }
+
+func TestWindowsPanicsOnNonPositiveSize(t *testing.T) {
+	mustPanic(t, "Windows size 0", func() { seq.Windows(seq.With(1, 2, 3), 0) })
+	mustPanic(t, "Windows size -1", func() { seq.Windows(seq.With(1, 2, 3), -1) })
+}
+
+func TestWindowsKVPanicsOnNonPositiveSize(t *testing.T) {
+	type kv = seq.KV[string, int]
+	mustPanic(t, "WindowsKV size 0", func() { seq.WindowsKV(seq.WithKV(kv{K: "a", V: 1}), 0) })
+	mustPanic(t, "WindowsKV size -1", func() { seq.WindowsKV(seq.WithKV(kv{K: "a", V: 1}), -1) })
+}
+
+func TestCycleEmptySequenceTerminates(t *testing.T) {
+	// Cycle restarts its input forever; an empty input must end the sequence instead of spinning.
+	withTimeout(t, 5*time.Second, func() {
+		for range seq.Cycle(seq.With[int]()) {
+		}
+	})
+	withTimeout(t, 5*time.Second, func() {
+		for range seq.CycleKV(seq.WithKV[string, int]()) {
+		}
+	})
+}
+
+func TestFromChanCtxCancelUnblocks(t *testing.T) {
+	// FromChanCtx must end when the context is canceled even if the channel never produces another value.
+	ctx, cancel := context.WithCancel(t.Context())
+	ch := make(chan int)
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		cancel()
+	}()
+	withTimeout(t, 5*time.Second, func() {
+		for range seq.FromChanCtx(ctx, ch) {
+		}
+	})
+}

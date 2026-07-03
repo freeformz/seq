@@ -884,7 +884,10 @@ func EveryUntil(d time.Duration, until time.Time) iter.Seq[time.Time] {
 			if !yield(now) {
 				return
 			}
-			if now.After(until) {
+			// Re-check the clock after the yield returns: a slow iteratee may have consumed the
+			// remaining time, and ending here beats waiting out another tick to notice. Checking
+			// now again would be useless — it cannot have changed since the check above.
+			if time.Now().After(until) {
 				return
 			}
 		}
@@ -1026,4 +1029,617 @@ func FindByValue[K comparable, V comparable](seq iter.Seq2[K, V], value V) (K, i
 	}
 	var k K
 	return k, i, false
+}
+
+// Take returns a sequence of the first n elements of the sequence. If the sequence has fewer than n elements, the
+// returned sequence yields all of them. If n is not positive, the returned sequence is empty. The provided sequence is
+// iterated over lazily when the returned sequence is iterated over.
+func Take[T any](seq iter.Seq[T], n int) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		if n <= 0 {
+			return
+		}
+		i := 0
+		for t := range seq {
+			if !yield(t) {
+				return
+			}
+			i++
+			if i == n {
+				return
+			}
+		}
+	}
+}
+
+// TakeKV returns a sequence of the first n key-value pairs of the sequence. If the sequence has fewer than n pairs, the
+// returned sequence yields all of them. If n is not positive, the returned sequence is empty. The provided sequence is
+// iterated over lazily when the returned sequence is iterated over.
+func TakeKV[K, V any](seq iter.Seq2[K, V], n int) iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		if n <= 0 {
+			return
+		}
+		i := 0
+		for k, v := range seq {
+			if !yield(k, v) {
+				return
+			}
+			i++
+			if i == n {
+				return
+			}
+		}
+	}
+}
+
+// TakeWhile returns a sequence of the leading elements of the sequence for which the function returns true. The
+// sequence ends before the first element for which the function returns false. The provided sequence is iterated over
+// lazily when the returned sequence is iterated over.
+func TakeWhile[T any](seq iter.Seq[T], fn func(T) bool) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		for t := range seq {
+			if !fn(t) || !yield(t) {
+				return
+			}
+		}
+	}
+}
+
+// TakeKVWhile returns a sequence of the leading key-value pairs of the sequence for which the function returns true.
+// The sequence ends before the first pair for which the function returns false. The provided sequence is iterated over
+// lazily when the returned sequence is iterated over.
+func TakeKVWhile[K, V any](seq iter.Seq2[K, V], fn func(K, V) bool) iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		for k, v := range seq {
+			if !fn(k, v) || !yield(k, v) {
+				return
+			}
+		}
+	}
+}
+
+// DropWhile returns a sequence that skips the leading elements of the sequence for which the function returns true and
+// then yields every remaining element, starting with the first element for which the function returns false. Unlike
+// [DropBy], the function is not applied after the first non-matching element. The provided sequence is iterated over
+// lazily when the returned sequence is iterated over.
+func DropWhile[T any](seq iter.Seq[T], fn func(T) bool) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		dropping := true
+		for t := range seq {
+			if dropping && fn(t) {
+				continue
+			}
+			dropping = false
+			if !yield(t) {
+				return
+			}
+		}
+	}
+}
+
+// DropKVWhile returns a sequence that skips the leading key-value pairs of the sequence for which the function returns
+// true and then yields every remaining pair, starting with the first pair for which the function returns false. Unlike
+// [DropKVBy], the function is not applied after the first non-matching pair. The provided sequence is iterated over
+// lazily when the returned sequence is iterated over.
+func DropKVWhile[K, V any](seq iter.Seq2[K, V], fn func(K, V) bool) iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		dropping := true
+		for k, v := range seq {
+			if dropping && fn(k, v) {
+				continue
+			}
+			dropping = false
+			if !yield(k, v) {
+				return
+			}
+		}
+	}
+}
+
+// Concat returns a sequence that yields the elements of each provided sequence in order. The provided sequences are
+// iterated over lazily when the returned sequence is iterated over.
+func Concat[T any](seqs ...iter.Seq[T]) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		for _, seq := range seqs {
+			for t := range seq {
+				if !yield(t) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// ConcatKV returns a sequence that yields the key-value pairs of each provided sequence in order. The provided
+// sequences are iterated over lazily when the returned sequence is iterated over.
+func ConcatKV[K, V any](seqs ...iter.Seq2[K, V]) iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		for _, seq := range seqs {
+			for k, v := range seq {
+				if !yield(k, v) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// Zip returns a sequence that pairs the elements of a and b positionally, yielding the elements of a as keys and the
+// elements of b as values. The sequence ends when either input sequence ends. The provided sequences are iterated over
+// lazily when the returned sequence is iterated over.
+func Zip[A, B any](a iter.Seq[A], b iter.Seq[B]) iter.Seq2[A, B] {
+	return func(yield func(A, B) bool) {
+		next, stop := iter.Pull(b)
+		defer stop()
+		for av := range a {
+			bv, ok := next()
+			if !ok {
+				return
+			}
+			if !yield(av, bv) {
+				return
+			}
+		}
+	}
+}
+
+// Merge merges two sorted sequences into one sorted sequence. [cmp.Compare] is used to compare elements. If the input
+// sequences are not sorted the output will not be sorted either, but it will still contain every element of both. The
+// provided sequences are iterated over lazily when the returned sequence is iterated over.
+func Merge[T cmp.Ordered](a, b iter.Seq[T]) iter.Seq[T] {
+	return MergeFunc(a, b, cmp.Compare)
+}
+
+// MergeFunc is like [Merge] but uses the function to compare elements. When elements compare equal, elements from b are
+// yielded before elements from a. The provided sequences are iterated over lazily when the returned sequence is
+// iterated over.
+func MergeFunc[T any](a, b iter.Seq[T], compare func(T, T) int) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		next, stop := iter.Pull(b)
+		defer stop()
+		bv, bok := next()
+		for av := range a {
+			for bok && compare(bv, av) <= 0 {
+				if !yield(bv) {
+					return
+				}
+				bv, bok = next()
+			}
+			if !yield(av) {
+				return
+			}
+		}
+		for bok {
+			if !yield(bv) {
+				return
+			}
+			bv, bok = next()
+		}
+	}
+}
+
+// Flatten returns a sequence that yields the elements of each inner sequence in order. It is the inverse of [Chunk].
+// The provided sequence is iterated over lazily when the returned sequence is iterated over.
+func Flatten[T any](seq iter.Seq[iter.Seq[T]]) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		for inner := range seq {
+			for t := range inner {
+				if !yield(t) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// FlattenKV returns a sequence that yields the key-value pairs of each inner sequence in order. It is the inverse of
+// [ChunkKV]. The provided sequence is iterated over lazily when the returned sequence is iterated over.
+func FlattenKV[K, V any](seq iter.Seq[iter.Seq2[K, V]]) iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		for inner := range seq {
+			for k, v := range inner {
+				if !yield(k, v) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// FlatMap maps each value in the sequence to a sequence with the function and yields the elements of each resulting
+// sequence in order. Function application happens lazily when the returned sequence is iterated over.
+func FlatMap[T, O any](seq iter.Seq[T], fn func(T) iter.Seq[O]) iter.Seq[O] {
+	return func(yield func(O) bool) {
+		for t := range seq {
+			for o := range fn(t) {
+				if !yield(o) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// Unique returns a sequence that yields the first occurrence of each distinct value in the sequence. Unlike [Compact],
+// which only removes adjacent duplicates, Unique removes duplicates anywhere in the sequence; it needs memory
+// proportional to the number of distinct values to do so. The provided sequence is iterated over lazily when the
+// returned sequence is iterated over.
+func Unique[T comparable](seq iter.Seq[T]) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		seen := make(map[T]struct{})
+		for t := range seq {
+			if _, ok := seen[t]; ok {
+				continue
+			}
+			seen[t] = struct{}{}
+			if !yield(t) {
+				return
+			}
+		}
+	}
+}
+
+// UniqueKV returns a sequence that yields the first occurrence of each distinct key-value pair in the sequence. Unlike
+// [CompactKV], which only removes adjacent duplicates, UniqueKV removes duplicates anywhere in the sequence; it needs
+// memory proportional to the number of distinct pairs to do so. The provided sequence is iterated over lazily when the
+// returned sequence is iterated over.
+func UniqueKV[K, V comparable](seq iter.Seq2[K, V]) iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		seen := make(map[KV[K, V]]struct{})
+		for k, v := range seq {
+			kv := KV[K, V]{K: k, V: v}
+			if _, ok := seen[kv]; ok {
+				continue
+			}
+			seen[kv] = struct{}{}
+			if !yield(k, v) {
+				return
+			}
+		}
+	}
+}
+
+// Partition returns two sequences: the first yields the elements for which the function returns true, the second
+// yields the rest. Each returned sequence iterates over the provided sequence independently, so iterating both
+// iterates the provided sequence twice.
+func Partition[T any](seq iter.Seq[T], fn func(T) bool) (iter.Seq[T], iter.Seq[T]) {
+	return Filter(seq, fn), DropBy(seq, fn)
+}
+
+// PartitionKV returns two sequences: the first yields the key-value pairs for which the function returns true, the
+// second yields the rest. Each returned sequence iterates over the provided sequence independently, so iterating both
+// iterates the provided sequence twice.
+func PartitionKV[K, V any](seq iter.Seq2[K, V], fn func(K, V) bool) (iter.Seq2[K, V], iter.Seq2[K, V]) {
+	return FilterKV(seq, fn), DropKVBy(seq, fn)
+}
+
+// GroupBy returns a key-value sequence where the keys are the results of applying keyFn to each value and the values
+// are slices of the values that produced each key, in encounter order. Keys are yielded in first-seen order. The
+// provided sequence is iterated over completely when the returned sequence is iterated over.
+func GroupBy[K comparable, T any](seq iter.Seq[T], keyFn func(T) K) iter.Seq2[K, []T] {
+	return func(yield func(K, []T) bool) {
+		groups := make(map[K][]T)
+		var order []K
+		for t := range seq {
+			k := keyFn(t)
+			if _, ok := groups[k]; !ok {
+				order = append(order, k)
+			}
+			groups[k] = append(groups[k], t)
+		}
+		for _, k := range order {
+			if !yield(k, groups[k]) {
+				return
+			}
+		}
+	}
+}
+
+// Windows returns a sequence of overlapping windows of size consecutive elements. Each window after the first drops
+// the oldest element of the previous window and appends the next element of the sequence. If the sequence has fewer
+// than size elements the returned sequence is empty. The size must be at least 1; if not, the function will panic. The
+// provided sequence is iterated over lazily when the returned sequence is iterated over.
+func Windows[T any](seq iter.Seq[T], size int) iter.Seq[iter.Seq[T]] {
+	if size < 1 {
+		panic("seq: Windows size must be at least 1")
+	}
+	return func(yield func(iter.Seq[T]) bool) {
+		window := make([]T, 0, size)
+		for t := range seq {
+			if len(window) == size {
+				copy(window, window[1:])
+				window[size-1] = t
+			} else {
+				window = append(window, t)
+			}
+			if len(window) == size {
+				w := make([]T, size)
+				copy(w, window)
+				if !yield(With(w...)) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// WindowsKV is like [Windows] but for key-value pairs. If the sequence has fewer than size pairs the returned sequence
+// is empty. The size must be at least 1; if not, the function will panic. The provided sequence is iterated over lazily
+// when the returned sequence is iterated over.
+func WindowsKV[K, V any](seq iter.Seq2[K, V], size int) iter.Seq[iter.Seq2[K, V]] {
+	if size < 1 {
+		panic("seq: WindowsKV size must be at least 1")
+	}
+	return func(yield func(iter.Seq2[K, V]) bool) {
+		window := make([]KV[K, V], 0, size)
+		for k, v := range seq {
+			if len(window) == size {
+				copy(window, window[1:])
+				window[size-1] = KV[K, V]{K: k, V: v}
+			} else {
+				window = append(window, KV[K, V]{K: k, V: v})
+			}
+			if len(window) == size {
+				w := make([]KV[K, V], size)
+				copy(w, window)
+				if !yield(WithKV(w...)) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// All returns true if the function returns true for every value in the sequence. All returns true for an empty
+// sequence. The sequence is iterated over until the function returns false when All is called.
+func All[T any](seq iter.Seq[T], fn func(T) bool) bool {
+	for t := range seq {
+		if !fn(t) {
+			return false
+		}
+	}
+	return true
+}
+
+// AllKV returns true if the function returns true for every key-value pair in the sequence. AllKV returns true for an
+// empty sequence. The sequence is iterated over until the function returns false when AllKV is called.
+func AllKV[K, V any](seq iter.Seq2[K, V], fn func(K, V) bool) bool {
+	for k, v := range seq {
+		if !fn(k, v) {
+			return false
+		}
+	}
+	return true
+}
+
+// None returns true if the function returns false for every value in the sequence. None returns true for an empty
+// sequence. This is the opposite of [ContainsFunc]. The sequence is iterated over until the function returns true when
+// None is called.
+func None[T any](seq iter.Seq[T], fn func(T) bool) bool {
+	return !ContainsFunc(seq, fn)
+}
+
+// NoneKV returns true if the function returns false for every key-value pair in the sequence. NoneKV returns true for
+// an empty sequence. This is the opposite of [ContainsKVFunc]. The sequence is iterated over until the function returns
+// true when NoneKV is called.
+func NoneKV[K, V any](seq iter.Seq2[K, V], fn func(K, V) bool) bool {
+	return !ContainsKVFunc(seq, fn)
+}
+
+// Number is the constraint used by the numeric aggregation functions [Sum], [Product], and [Average]. It permits any
+// integer or floating point type.
+type Number interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 |
+		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr |
+		~float32 | ~float64
+}
+
+// Sum returns the sum of the values in the sequence, or zero if the sequence is empty. The sequence is iterated over
+// before Sum returns.
+func Sum[T Number](seq iter.Seq[T]) T {
+	var sum T
+	for t := range seq {
+		sum += t
+	}
+	return sum
+}
+
+// Product returns the product of the values in the sequence, or one if the sequence is empty. The sequence is iterated
+// over before Product returns.
+func Product[T Number](seq iter.Seq[T]) T {
+	product := T(1)
+	for t := range seq {
+		product *= t
+	}
+	return product
+}
+
+// Average returns the arithmetic mean of the values in the sequence. If the sequence is empty, the second return value
+// is false. The sequence is iterated over before Average returns.
+func Average[T Number](seq iter.Seq[T]) (float64, bool) {
+	var sum float64
+	var count int
+	for t := range seq {
+		sum += float64(t)
+		count++
+	}
+	if count == 0 {
+		return 0, false
+	}
+	return sum / float64(count), true
+}
+
+// Last returns the final value in the sequence. If the sequence is empty, the second return value is false. The
+// sequence is iterated over completely before Last returns.
+func Last[T any](seq iter.Seq[T]) (T, bool) {
+	var last T
+	var found bool
+	for t := range seq {
+		last = t
+		found = true
+	}
+	return last, found
+}
+
+// LastKV returns the final key-value pair in the sequence. If the sequence is empty, the third return value is false.
+// The sequence is iterated over completely before LastKV returns.
+func LastKV[K, V any](seq iter.Seq2[K, V]) (K, V, bool) {
+	var lk K
+	var lv V
+	var found bool
+	for k, v := range seq {
+		lk = k
+		lv = v
+		found = true
+	}
+	return lk, lv, found
+}
+
+// Scan is like [Reduce] but returns a sequence that yields the accumulated value after each element instead of only
+// the final value. The initial value itself is not yielded, so the returned sequence has as many elements as the
+// provided one. The provided sequence is iterated over lazily when the returned sequence is iterated over.
+func Scan[T, O any](seq iter.Seq[T], initial O, fn func(agg O, t T) O) iter.Seq[O] {
+	return func(yield func(O) bool) {
+		agg := initial
+		for t := range seq {
+			agg = fn(agg, t)
+			if !yield(agg) {
+				return
+			}
+		}
+	}
+}
+
+// ScanKV is like [ReduceKV] but returns a sequence that yields the accumulated value after each key-value pair instead
+// of only the final value. The initial value itself is not yielded, so the returned sequence has as many elements as
+// the provided one has pairs. The provided sequence is iterated over lazily when the returned sequence is iterated
+// over.
+func ScanKV[K, V, O any](seq iter.Seq2[K, V], initial O, fn func(agg O, k K, v V) O) iter.Seq[O] {
+	return func(yield func(O) bool) {
+		agg := initial
+		for k, v := range seq {
+			agg = fn(agg, k, v)
+			if !yield(agg) {
+				return
+			}
+		}
+	}
+}
+
+// Cycle returns a sequence that yields the elements of the sequence repeatedly, restarting from the beginning each
+// time the provided sequence is exhausted. The returned sequence is infinite unless the provided sequence is empty, so
+// bound iteration with something like [Take] or a break. The provided sequence must be re-iterable; single-use
+// sequences (like those from [FromChan]) will not restart.
+func Cycle[T any](seq iter.Seq[T]) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		for {
+			empty := true
+			for t := range seq {
+				empty = false
+				if !yield(t) {
+					return
+				}
+			}
+			if empty {
+				return
+			}
+		}
+	}
+}
+
+// CycleKV returns a sequence that yields the key-value pairs of the sequence repeatedly, restarting from the beginning
+// each time the provided sequence is exhausted. The returned sequence is infinite unless the provided sequence is
+// empty, so bound iteration with something like [TakeKV] or a break. The provided sequence must be re-iterable;
+// single-use sequences will not restart.
+func CycleKV[K, V any](seq iter.Seq2[K, V]) iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		for {
+			empty := true
+			for k, v := range seq {
+				empty = false
+				if !yield(k, v) {
+					return
+				}
+			}
+			if empty {
+				return
+			}
+		}
+	}
+}
+
+// SwapKV returns a sequence with the keys and values of each pair swapped: the values become the keys and the keys
+// become the values. The provided sequence is iterated over lazily when the returned sequence is iterated over.
+func SwapKV[K, V any](seq iter.Seq2[K, V]) iter.Seq2[V, K] {
+	return func(yield func(V, K) bool) {
+		for k, v := range seq {
+			if !yield(v, k) {
+				return
+			}
+		}
+	}
+}
+
+// Tap returns a sequence that yields the same elements as the provided sequence, calling the function on each element
+// as it passes through. Useful for debugging or other side effects in the middle of a pipeline. The function is
+// applied lazily when the returned sequence is iterated over.
+func Tap[T any](seq iter.Seq[T], fn func(T)) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		for t := range seq {
+			fn(t)
+			if !yield(t) {
+				return
+			}
+		}
+	}
+}
+
+// TapKV returns a sequence that yields the same key-value pairs as the provided sequence, calling the function on each
+// pair as it passes through. Useful for debugging or other side effects in the middle of a pipeline. The function is
+// applied lazily when the returned sequence is iterated over.
+func TapKV[K, V any](seq iter.Seq2[K, V], fn func(K, V)) iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		for k, v := range seq {
+			fn(k, v)
+			if !yield(k, v) {
+				return
+			}
+		}
+	}
+}
+
+// FromChanCtx is like [FromChan] but stops when the context is canceled, even if the channel is blocked. The sequence
+// ends when the channel is closed or the context is canceled, whichever comes first.
+func FromChanCtx[T any](ctx context.Context, ch <-chan T) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case t, ok := <-ch:
+				if !ok {
+					return
+				}
+				if !yield(t) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// Enumerate returns a key-value sequence that pairs each value in the sequence with its 0-based index. Unlike
+// combining [IterKV] with [IntK], the index restarts at 0 each time the returned sequence is iterated over. The
+// provided sequence is iterated over lazily when the returned sequence is iterated over.
+func Enumerate[T any](seq iter.Seq[T]) iter.Seq2[int, T] {
+	return func(yield func(int, T) bool) {
+		var i int
+		for t := range seq {
+			if !yield(i, t) {
+				return
+			}
+			i++
+		}
+	}
 }
