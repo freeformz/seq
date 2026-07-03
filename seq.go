@@ -702,8 +702,8 @@ func ReplaceKV[K, V comparable](seq iter.Seq2[K, V], old KV[K, V], new KV[K, V])
 	}
 }
 
-// IsSorted returns true if the sequence is sorted. The provided sequence is iterated over before IsSorted returns. [cmp.Compare]
-// // is used to compare elements.
+// IsSorted returns true if the sequence is sorted. The provided sequence is iterated over before IsSorted returns.
+// [cmp.Compare] is used to compare elements.
 func IsSorted[T cmp.Ordered](seq iter.Seq[T]) bool {
 	var prev T
 	first := true
