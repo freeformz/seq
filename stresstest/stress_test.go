@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/freeformz/seq"
@@ -61,6 +62,56 @@ func TestEveryUntilPanicsOnNonPositiveDuration(t *testing.T) {
 	// panicking as documented.
 	mustPanic(t, "EveryUntil d=0", func() { seq.EveryUntil(0, time.Now()) })
 	mustPanic(t, "EveryUntil d=-1", func() { seq.EveryUntil(-time.Second, time.Now()) })
+}
+
+func TestEveryUntilTickCount(t *testing.T) {
+	// On the synctest fake clock ticks land exactly on every interval, so the count is exact: ticks at 10, 20, 30,
+	// and 40ms; the 50ms tick is past the deadline.
+	synctest.Test(t, func(t *testing.T) {
+		var ticks int
+		for range seq.EveryUntil(10*time.Millisecond, time.Now().Add(45*time.Millisecond)) {
+			ticks++
+		}
+		if ticks != 4 {
+			t.Errorf("EveryUntil yielded %d ticks, want 4", ticks)
+		}
+	})
+}
+
+func TestEveryUntilSlowIterateeEndsWithoutExtraTick(t *testing.T) {
+	// Regression: EveryUntil used to re-check the pre-yield timestamp after the yield returned, so a slow iteratee
+	// that consumed the remaining time still waited out one more tick (40ms total here) before noticing the
+	// deadline had passed. It must end as soon as the yield returns (at 30ms: first tick at 10ms + 20ms sleep).
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		var ticks int
+		for range seq.EveryUntil(10*time.Millisecond, start.Add(15*time.Millisecond)) {
+			ticks++
+			time.Sleep(20 * time.Millisecond)
+		}
+		if ticks != 1 {
+			t.Errorf("EveryUntil yielded %d ticks, want 1", ticks)
+		}
+		if elapsed := time.Since(start); elapsed != 30*time.Millisecond {
+			t.Errorf("EveryUntil ended after %v, want 30ms", elapsed)
+		}
+	})
+}
+
+func TestEveryNTiming(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		var ticks int
+		for range seq.EveryN(10*time.Millisecond, 3) {
+			ticks++
+		}
+		if ticks != 3 {
+			t.Errorf("EveryN yielded %d ticks, want 3", ticks)
+		}
+		if elapsed := time.Since(start); elapsed != 30*time.Millisecond {
+			t.Errorf("EveryN ended after %v, want 30ms", elapsed)
+		}
+	})
 }
 
 func TestEveryNPanicsOnNonPositiveDuration(t *testing.T) {
@@ -192,4 +243,57 @@ func TestToChanCtxCancelClosesChannel(t *testing.T) {
 		for range ch { //nolint:revive // drain until closed
 		}
 	})
+}
+
+func TestWindowsPanicsOnNonPositiveSize(t *testing.T) {
+	mustPanic(t, "Windows size 0", func() { seq.Windows(seq.With(1, 2, 3), 0) })
+	mustPanic(t, "Windows size -1", func() { seq.Windows(seq.With(1, 2, 3), -1) })
+}
+
+func TestWindowsKVPanicsOnNonPositiveSize(t *testing.T) {
+	type kv = seq.KV[string, int]
+	mustPanic(t, "WindowsKV size 0", func() { seq.WindowsKV(seq.WithKV(kv{K: "a", V: 1}), 0) })
+	mustPanic(t, "WindowsKV size -1", func() { seq.WindowsKV(seq.WithKV(kv{K: "a", V: 1}), -1) })
+}
+
+func TestCycleEmptySequenceTerminates(t *testing.T) {
+	// Cycle restarts its input forever; an empty input must end the sequence instead of spinning.
+	withTimeout(t, 5*time.Second, func() {
+		for range seq.Cycle(seq.With[int]()) {
+		}
+	})
+	withTimeout(t, 5*time.Second, func() {
+		for range seq.CycleKV(seq.WithKV[string, int]()) {
+		}
+	})
+}
+
+func TestFromChanCtxCancelUnblocks(t *testing.T) {
+	// FromChanCtx must end when the context is canceled even if the channel never produces another value. Inside
+	// the synctest bubble a regression shows up as a deadlock panic instead of needing a real-time timeout.
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		ch := make(chan int)
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			cancel()
+		}()
+		for range seq.FromChanCtx(ctx, ch) {
+			t.Error("FromChanCtx yielded a value from an empty channel")
+		}
+	})
+}
+
+func TestFromChanCtxCanceledCtxWinsOverReadyChannel(t *testing.T) {
+	// Regression: with a bare two-case select, an already-canceled context raced a ready channel and values could
+	// still be yielded after cancellation. Cancellation must take priority.
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	ch := make(chan int, 1)
+	ch <- 1
+	for range 100 {
+		for range seq.FromChanCtx(ctx, ch) {
+			t.Fatal("FromChanCtx yielded a value after the context was already canceled")
+		}
+	}
 }
