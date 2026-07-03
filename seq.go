@@ -1610,10 +1610,18 @@ func TapKV[K, V any](seq iter.Seq2[K, V], fn func(K, V)) iter.Seq2[K, V] {
 }
 
 // FromChanCtx is like [FromChan] but stops when the context is canceled, even if the channel is blocked. The sequence
-// ends when the channel is closed or the context is canceled, whichever comes first.
+// ends when the channel is closed or the context is canceled, whichever comes first. Cancellation takes priority: once
+// the context is canceled no further values are yielded, even if the channel has values ready.
 func FromChanCtx[T any](ctx context.Context, ch <-chan T) iter.Seq[T] {
 	return func(yield func(T) bool) {
 		for {
+			// An already-canceled context must win over a ready channel; a bare select chooses randomly when
+			// both cases are ready.
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			select {
 			case <-ctx.Done():
 				return

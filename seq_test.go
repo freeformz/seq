@@ -993,25 +993,16 @@ func ExampleDropKVBy() {
 }
 
 func ExampleEveryUntil() {
-	var ticks int
-	for t := range EveryUntil(time.Millisecond, time.Now().Add(50*time.Millisecond)) {
+	// The deadline is generous so the example stays deterministic; exact timing behaviors (tick counts, slow
+	// iteratees) are asserted in the stresstest package on a testing/synctest fake clock.
+	for t := range EveryUntil(time.Millisecond, time.Now().Add(time.Minute)) {
 		_ = t // t == 2025-03-23 18:53:05.064589166 -0700 PDT m=+0.007687209
-		ticks++
-	}
-	fmt.Println(ticks > 0)
-
-	// a slow iteratee can consume the remaining time; the sequence ends without waiting for another tick
-	for range EveryUntil(time.Millisecond, time.Now().Add(5*time.Millisecond)) {
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	// breaking stops the ticker
-	for range EveryUntil(time.Millisecond, time.Now().Add(50*time.Millisecond)) {
+		fmt.Println("tick")
 		break
 	}
 
 	// Output:
-	// true
+	// tick
 }
 
 func ExampleEveryN() {
