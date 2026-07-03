@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Go library (`github.com/freeformz/seq`) providing functional iterator/sequence utilities built on Go's `iter.Seq[T]` and `iter.Seq2[K,V]` types. Requires Go 1.24+. Zero external dependencies. Single package, single source file (`seq.go`).
+Go library (`github.com/freeformz/seq`) providing functional iterator/sequence utilities built on Go's `iter.Seq[T]` and `iter.Seq2[K,V]` types. Requires Go 1.25+. Zero external dependencies. Single package, single source file (`seq.go`).
 
 ## Commands
 

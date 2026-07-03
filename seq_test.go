@@ -32,7 +32,7 @@ func ExampleWithKV() {
 		fmt.Println(k, v)
 	}
 
-	// Unordered output:
+	// Output:
 	// a 1
 	// b 2
 	// c 3
@@ -294,7 +294,7 @@ func ExampleIterK() {
 		fmt.Println(k)
 	}
 
-	// Unordered output:
+	// Output:
 	// a
 	// b
 	// c
@@ -307,7 +307,7 @@ func ExampleIterV() {
 		fmt.Println(k)
 	}
 
-	// Unordered output:
+	// Output:
 	// 1
 	// 2
 	// 3
