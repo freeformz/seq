@@ -66,7 +66,9 @@ func FromChan[T any](ch <-chan T) iter.Seq[T] {
 }
 
 // ToChan returns a channel that yields values from the provided sequence. The provided sequence is iterated over lazily when
-// the returned channel is iterated over. The channel is closed when the sequence is exhausted.
+// the returned channel is iterated over. The channel is closed when the sequence is exhausted. If the consumer stops
+// receiving before the sequence is exhausted, the producing goroutine blocks forever; use [ToChanCtx] when the
+// consumer may abandon the channel.
 func ToChan[T any](seq iter.Seq[T]) <-chan T {
 	ch := make(chan T)
 	go func() {
@@ -198,9 +200,9 @@ func IntK[V any]() func(V) int {
 
 // IterKV converts an iter.Seq[V] to an iter.Seq2[K, V]. The provided sequence is iterated over lazily when the returned
 // sequence is iterated over. keyFn is called for each value to get the key.
-func IterKV[K, V any](iter iter.Seq[V], keyFn func(V) K) iter.Seq2[K, V] {
+func IterKV[K, V any](seq iter.Seq[V], keyFn func(V) K) iter.Seq2[K, V] {
 	return func(yield func(k K, v V) bool) {
-		for v := range iter {
+		for v := range seq {
 			k := keyFn(v)
 			if !yield(k, v) {
 				return
@@ -211,9 +213,9 @@ func IterKV[K, V any](iter iter.Seq[V], keyFn func(V) K) iter.Seq2[K, V] {
 
 // IterK converts an iter.Seq2[K, V] to an iter.Seq[K]. The provided sequence is iterated over lazily when the returned
 // sequence is iterated over.
-func IterK[K, V any](iter iter.Seq2[K, V]) iter.Seq[K] {
+func IterK[K, V any](seq iter.Seq2[K, V]) iter.Seq[K] {
 	return func(yield func(k K) bool) {
-		for k := range iter {
+		for k := range seq {
 			if !yield(k) {
 				return
 			}
@@ -223,9 +225,9 @@ func IterK[K, V any](iter iter.Seq2[K, V]) iter.Seq[K] {
 
 // IterV converts an iter.Seq2[K, V] to an iter.Seq[V]. The provided sequence is iterated over lazily when the returned
 // sequence is iterated over.
-func IterV[K, V any](iter iter.Seq2[K, V]) iter.Seq[V] {
+func IterV[K, V any](seq iter.Seq2[K, V]) iter.Seq[V] {
 	return func(yield func(v V) bool) {
-		for _, v := range iter {
+		for _, v := range seq {
 			if !yield(v) {
 				return
 			}
@@ -268,19 +270,14 @@ func MaxFunc[T any](seq iter.Seq[T], compare func(T, T) int) (T, bool) {
 func MaxFuncKV[K, V any](seq iter.Seq2[K, V], compare func(KV[K, V], KV[K, V]) int) (KV[K, V], bool) {
 	var mt KV[K, V]
 	var value bool
-	var i int
 	for k, v := range seq {
-		switch i {
-		case 0:
-			mt = KV[K, V]{K: k, V: v}
+		t := KV[K, V]{K: k, V: v}
+		if !value {
+			mt = t
 			value = true
-		default:
-			t := KV[K, V]{K: k, V: v}
-			if compare(t, mt) > 0 {
-				mt = t
-			}
+		} else if compare(t, mt) > 0 {
+			mt = t
 		}
-		i++
 	}
 	return mt, value
 }
@@ -320,19 +317,14 @@ func MinFunc[T any](seq iter.Seq[T], compare func(T, T) int) (T, bool) {
 func MinFuncKV[K, V any](seq iter.Seq2[K, V], compare func(KV[K, V], KV[K, V]) int) (KV[K, V], bool) {
 	var mt KV[K, V]
 	var value bool
-	var i int
 	for k, v := range seq {
-		switch i {
-		case 0:
-			mt = KV[K, V]{K: k, V: v}
+		t := KV[K, V]{K: k, V: v}
+		if !value {
+			mt = t
 			value = true
-		default:
-			t := KV[K, V]{K: k, V: v}
-			if compare(t, mt) < 0 {
-				mt = t
-			}
+		} else if compare(t, mt) < 0 {
+			mt = t
 		}
-		i++
 	}
 	return mt, value
 }
@@ -500,8 +492,9 @@ func Compare[T cmp.Ordered](a, b iter.Seq[T]) int {
 
 // CompareFunc compares the elements of a and b, using the compare func on each pair of elements. The elements are
 // compared sequentially, until one element is not equal to the other. The result of comparing the first non-matching
-// elements is returned. If both sequences are equal until one of them ends, the shorter sequence is considered less
-// than the longer one. The result is 0 if a == b, -1 if a < b, and +1 if a > b.
+// elements is returned verbatim — it is not normalized to -1 or +1. If both sequences are equal until one of them
+// ends, the shorter sequence is considered less than the longer one: the result is +1 if a is longer, -1 if b is
+// longer, and 0 if the sequences are equal.
 func CompareFunc[T any](a, b iter.Seq[T], compare func(T, T) int) int {
 	next, stop := iter.Pull(b)
 	defer stop()
@@ -528,17 +521,18 @@ func CompareFunc[T any](a, b iter.Seq[T], compare func(T, T) int) int {
 // CompareKV is like [CompareKVFunc] but uses the cmp.Compare function to compare keys and values.
 func CompareKV[K, V cmp.Ordered](a, b iter.Seq2[K, V]) int {
 	return CompareKVFunc(a, b, func(a, b KV[K, V]) int {
-		if cmp.Compare(a.K, b.K) == 0 {
-			return cmp.Compare(a.V, b.V)
+		if c := cmp.Compare(a.K, b.K); c != 0 {
+			return c
 		}
-		return cmp.Compare(a.K, b.K)
+		return cmp.Compare(a.V, b.V)
 	})
 }
 
 // CompareKVFunc compares the key-value pairs of a and b, using the compare func on each pair of key-value pairs. The key-value
 // pairs are compared sequentially, until one key-value pair is not equal to the other. The result of comparing the first
-// non-matching key-value pairs is returned. If both sequences are equal until one of them ends, the shorter sequence is
-// considered less than the longer one. The result is 0 if a == b, -1 if a < b, and +1 if a > b.
+// non-matching key-value pairs is returned verbatim — it is not normalized to -1 or +1. If both sequences are equal
+// until one of them ends, the shorter sequence is considered less than the longer one: the result is +1 if a is
+// longer, -1 if b is longer, and 0 if the sequences are equal.
 func CompareKVFunc[AK, AV, BK, BV any](a iter.Seq2[AK, AV], b iter.Seq2[BK, BV], compare func(a KV[AK, AV], b KV[BK, BV]) int) int {
 	next, stop := iter.Pull2(b)
 	defer stop()
@@ -734,30 +728,29 @@ func IsSortedKV[K, V cmp.Ordered](seq iter.Seq2[K, V]) bool {
 	return true
 }
 
-// Coalesce returns the first non zero value in the sequence. The provided sequence is iterated over before Coalesce
-// returns. If no non-zero value is found, the second return value is false.
+// Coalesce returns the first non zero value in the sequence. The provided sequence is iterated over when Coalesce is
+// called, stopping at the first non-zero value. If no non-zero value is found, the second return value is false.
 func Coalesce[T comparable](seq iter.Seq[T]) (T, bool) {
-	var value T
-	var found bool
+	var zero T
 	for t := range seq {
-		if t != value {
+		if t != zero {
 			return t, true
 		}
 	}
-	return value, found
+	return zero, false
 }
 
 // CoalesceKV returns the first key-value pair in the sequence whose value is non zero. The provided sequence is
-// iterated over before CoalesceKV returns. If no non-zero value is found, the second return value is false.
+// iterated over when CoalesceKV is called, stopping at the first non-zero value. If no non-zero value is found, the
+// second return value is false.
 func CoalesceKV[K, V comparable](seq iter.Seq2[K, V]) (KV[K, V], bool) {
-	var value V
-	var found bool
+	var zero V
 	for k, v := range seq {
-		if v != value {
+		if v != zero {
 			return KV[K, V]{K: k, V: v}, true
 		}
 	}
-	return KV[K, V]{}, found
+	return KV[K, V]{}, false
 }
 
 // Count returns the number of elements in the sequence. The sequence is iterated over before Count returns.
@@ -973,8 +966,8 @@ func AtKV[K any, V any](seq iter.Seq2[K, V], index int) (K, V, bool) {
 	return zk, zv, false
 }
 
-// Find returns the index of the first occurrence of the value in the sequence, the "index" (0 based) of the value, and true. If
-// the value is not found, the first return value is the length of the sequence, the second return value is false. The provided
+// Find returns the 0-based index of the first occurrence of the value in the sequence and true. If the value is not
+// found, the first return value is the length of the sequence and the second return value is false. The provided
 // sequence is iterated over when Find is called.
 func Find[T comparable](seq iter.Seq[T], value T) (int, bool) {
 	var i int
@@ -987,7 +980,7 @@ func Find[T comparable](seq iter.Seq[T], value T) (int, bool) {
 	return i, false
 }
 
-// FindBy returns the first value in the sequence for which the function returns true, the "index" (0) based) of the
+// FindBy returns the first value in the sequence for which the function returns true, the "index" (0 based) of the
 // value, and true. If no value is found, the first return value is the zero value of the type, the second return value
 // is the length of the sequence, and the third return value is false. The provided sequence is iterated over when FindBy is called.
 func FindBy[T any](seq iter.Seq[T], fn func(T) bool) (T, int, bool) {
