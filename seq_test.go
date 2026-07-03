@@ -1157,3 +1157,78 @@ func ExampleFindByValue() {
 	// b 1 true
 	//  3 false
 }
+
+func ExampleFind_empty() {
+	// The returned length of an empty sequence is 0.
+	fmt.Println(Find(With[int](), 42))
+
+	// Output:
+	// 0 false
+}
+
+func ExampleFindBy_empty() {
+	// The returned length of an empty sequence is 0.
+	fmt.Println(FindBy(With[int](), func(int) bool { return true }))
+
+	// Output:
+	// 0 0 false
+}
+
+func ExampleDropKV_reusable() {
+	type tKV = KV[string, int]
+	i := WithKV(tKV{K: "a", V: 1}, tKV{K: "b", V: 2}, tKV{K: "c", V: 3})
+
+	// The same DropKV sequence can be iterated over more than once.
+	d := DropKV(i, 2)
+	for k, v := range d {
+		fmt.Println(k, v)
+	}
+	for k, v := range d {
+		fmt.Println(k, v)
+	}
+
+	// Output:
+	// c 3
+	// c 3
+}
+
+func ExampleCompactKV_zeroValueFirst() {
+	type tKV = KV[int, int]
+	// A leading zero-value pair is yielded like any other pair.
+	i := WithKV(tKV{K: 0, V: 0}, tKV{K: 0, V: 0}, tKV{K: 1, V: 1})
+
+	for k, v := range CompactKV(i) {
+		fmt.Println(k, v)
+	}
+
+	// Output:
+	// 0 0
+	// 1 1
+}
+
+func ExampleCompactKVFunc_zeroValueFirst() {
+	type tKV = KV[string, int]
+	// A first pair that compares equal to the zero-value pair is yielded like any other pair.
+	i := WithKV(tKV{K: "", V: 5}, tKV{K: "", V: 6}, tKV{K: "a", V: 1})
+
+	for k, v := range CompactKVFunc(i, func(a, b tKV) bool {
+		return a.K == b.K
+	}) {
+		fmt.Println(k, v)
+	}
+
+	// Output:
+	//  5
+	// a 1
+}
+
+func ExampleIsSortedKV_negative() {
+	type tKV = KV[int, int]
+	// Sorted pairs that compare less than the zero-value pair are still sorted.
+	i := WithKV(tKV{K: -2, V: -2}, tKV{K: -1, V: -1})
+
+	fmt.Println(IsSortedKV(i))
+
+	// Output:
+	// true
+}

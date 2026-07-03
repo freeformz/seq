@@ -419,8 +419,10 @@ func CompactFunc[T any](seq iter.Seq[T], equal func(T, T) bool) iter.Seq[T] {
 func CompactKV[K, V comparable](seq iter.Seq2[K, V]) iter.Seq2[K, V] {
 	return func(yield func(K, V) bool) {
 		var prev KV[K, V]
+		first := true
 		for k, v := range seq {
-			if prev.K != k || prev.V != v {
+			if first || prev.K != k || prev.V != v {
+				first = false
 				prev.K = k
 				prev.V = v
 				if !yield(k, v) {
@@ -437,8 +439,10 @@ func CompactKV[K, V comparable](seq iter.Seq2[K, V]) iter.Seq2[K, V] {
 func CompactKVFunc[K, V any](seq iter.Seq2[K, V], equal func(KV[K, V], KV[K, V]) bool) iter.Seq2[K, V] {
 	return func(yield func(K, V) bool) {
 		var prev KV[K, V]
+		first := true
 		for k, v := range seq {
-			if !equal(prev, KV[K, V]{K: k, V: v}) {
+			if first || !equal(prev, KV[K, V]{K: k, V: v}) {
+				first = false
 				prev.K = k
 				prev.V = v
 				if !yield(k, v) {
@@ -450,8 +454,11 @@ func CompactKVFunc[K, V any](seq iter.Seq2[K, V], equal func(KV[K, V], KV[K, V])
 }
 
 // Chunk the sequence into chunks of size. The provided sequence is iterated over lazily when the returned sequence is iterated
-// over. The last chunk may have fewer than size elements.
+// over. The last chunk may have fewer than size elements. The size must be at least 1; if not, the function will panic.
 func Chunk[T any](seq iter.Seq[T], size int) iter.Seq[iter.Seq[T]] {
+	if size < 1 {
+		panic("seq: chunk size must be at least 1")
+	}
 	return func(yield func(iter.Seq[T]) bool) {
 		var chunk []T
 		for t := range seq {
@@ -470,8 +477,11 @@ func Chunk[T any](seq iter.Seq[T], size int) iter.Seq[iter.Seq[T]] {
 }
 
 // ChunkKV is like [Chunk] but for key-value pairs. The provided sequence is iterated over lazily when the returned sequence is
-// iterated over. The last chunk may have fewer than size elements.
+// iterated over. The last chunk may have fewer than size elements. The size must be at least 1; if not, the function will panic.
 func ChunkKV[K, V any](seq iter.Seq2[K, V], size int) iter.Seq[iter.Seq2[K, V]] {
+	if size < 1 {
+		panic("seq: chunk size must be at least 1")
+	}
 	return func(yield func(iter.Seq2[K, V]) bool) {
 		var chunk []KV[K, V]
 		for k, v := range seq {
@@ -674,7 +684,7 @@ func EqualKVFunc[AK, AV, BK, BV any](a iter.Seq2[AK, AV], b iter.Seq2[BK, BV], e
 // Repeat returns a sequence which repeats the value n times.
 func Repeat[T any](n int, t T) iter.Seq[T] {
 	return func(yield func(T) bool) {
-		for i := 0; i < n; i++ {
+		for range n {
 			if !yield(t) {
 				return
 			}
@@ -685,7 +695,7 @@ func Repeat[T any](n int, t T) iter.Seq[T] {
 // RepeatKV returns a sequence which repeats the key-value pair n times.
 func RepeatKV[K, V any](n int, k K, v V) iter.Seq2[K, V] {
 	return func(yield func(K, V) bool) {
-		for i := 0; i < n; i++ {
+		for range n {
 			if !yield(k, v) {
 				return
 			}
@@ -746,10 +756,12 @@ func IsSorted[T cmp.Ordered](seq iter.Seq[T]) bool {
 // [cmp.Compare] is used to compare keys and values
 func IsSortedKV[K, V cmp.Ordered](seq iter.Seq2[K, V]) bool {
 	var prev KV[K, V]
+	first := true
 	for k, v := range seq {
-		if (cmp.Compare(k, prev.K) < 0) || (cmp.Compare(v, prev.V) < 0) {
+		if !first && ((cmp.Compare(k, prev.K) < 0) || (cmp.Compare(v, prev.V) < 0)) {
 			return false
 		}
+		first = false
 		prev.K = k
 		prev.V = v
 	}
@@ -859,8 +871,8 @@ func Drop[T any](seq iter.Seq[T], n int) iter.Seq[T] {
 // DropKV n key-value pairs from the starts of the sequence. The provided sequence is iterated over lazily when the returned
 // sequence is iterated over.
 func DropKV[K, V any](seq iter.Seq2[K, V], n int) iter.Seq2[K, V] {
-	i := -1
 	return func(yield func(K, V) bool) {
+		i := -1
 		for k, v := range seq {
 			i++
 			if i < n {
@@ -893,6 +905,9 @@ func DropKVBy[K, V any](seq iter.Seq2[K, V], fn func(K, V) bool) iter.Seq2[K, V]
 // the time interval or drop ticks to make up for slow iteratee. The duration d must be greater than zero; if not,
 // the function will panic. Waits d long before yielding the first element.
 func EveryUntil(d time.Duration, until time.Time) iter.Seq[time.Time] {
+	if d <= 0 {
+		panic("seq: non-positive interval for EveryUntil")
+	}
 	return func(yield func(time.Time) bool) {
 		for now := range time.Tick(d) {
 			if now.After(until) {
@@ -910,10 +925,13 @@ func EveryUntil(d time.Duration, until time.Time) iter.Seq[time.Time] {
 
 // EveryN returns a sequence that yields the time every d duration n times. The ticker will adjust the time interval or
 // drop ticks to make up for slow iteratee. The duration d must be greater than zero; if not, the function will panic.
-// Waits d long before yielding the first element.
+// Waits d long before yielding the first element. If times is not positive, the sequence is empty.
 func EveryN(d time.Duration, times int) iter.Seq[time.Time] {
+	if d <= 0 {
+		panic("seq: non-positive interval for EveryN")
+	}
 	return func(yield func(time.Time) bool) {
-		if times == 0 {
+		if times <= 0 {
 			return
 		}
 		for now := range time.Tick(d) {
@@ -989,13 +1007,13 @@ func AtKV[K any, V any](seq iter.Seq2[K, V], index int) (K, V, bool) {
 // sequence is iterated over when Find is called.
 func Find[T comparable](seq iter.Seq[T], value T) (int, bool) {
 	var i int
-	var t T
-	for i, t = range IterKV(seq, IntK[T]()) {
+	for t := range seq {
 		if t == value {
 			return i, true
 		}
+		i++
 	}
-	return i + 1, false
+	return i, false
 }
 
 // FindBy returns the first value in the sequence for which the function returns true, the "index" (0) based) of the
@@ -1003,14 +1021,14 @@ func Find[T comparable](seq iter.Seq[T], value T) (int, bool) {
 // is the length of the sequence, and the third return value is false. The provided sequence is iterated over when FindBy is called.
 func FindBy[T any](seq iter.Seq[T], fn func(T) bool) (T, int, bool) {
 	var i int
-	var t T
-	for i, t = range IterKV(seq, IntK[T]()) {
+	for t := range seq {
 		if fn(t) {
 			return t, i, true
 		}
+		i++
 	}
 	var z T
-	return z, i + 1, false
+	return z, i, false
 }
 
 // FindByKey returns the value of the first key-value pair in the sequence for which the function returns true, the
