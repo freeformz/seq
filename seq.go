@@ -548,7 +548,7 @@ func CompareKVFunc[AK, AV, BK, BV any](a iter.Seq2[AK, AV], b iter.Seq2[BK, BV],
 		if !ok { // b is shorter than a
 			return 1
 		}
-		if c := compare(KV[AK, AV]{ak, av}, KV[BK, BV]{bk, bv}); c != 0 {
+		if c := compare(KV[AK, AV]{K: ak, V: av}, KV[BK, BV]{K: bk, V: bv}); c != 0 {
 			return c
 		}
 	}
