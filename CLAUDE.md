@@ -25,6 +25,6 @@ go install honnef.co/go/tools/cmd/staticcheck@latest && staticcheck ./...
 
 **Lazy vs eager**: Transformation functions (Map, Filter, Chunk, Drop, etc.) return new iterators via closures over `yield func(T) bool`. Aggregation functions (Reduce, Min, Max, Count, etc.) consume the entire sequence eagerly.
 
-**Testing**: All tests are `Example` functions — they serve as both documentation and regression tests. No traditional unit tests. Run a single example with `go test -run ExampleFunctionName`.
+**Testing**: All tests in the main package are `Example` functions — they serve as both documentation and regression tests. No traditional unit tests in the main package. Run a single example with `go test -run ExampleFunctionName`. The `stresstest` subpackage is the exception: it holds regular `Test` functions for behaviors that can't be expressed as Examples (panics, hang regressions, data races, goroutine leaks) and should be run with `-race`.
 
 **Commit tags**: Commit messages use `#patch`, `#minor`, `#major`, or `#none` suffixes for automated semantic version bumping. Changing the Go version in `go.mod` should use `#minor`.
