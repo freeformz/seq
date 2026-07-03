@@ -441,12 +441,16 @@ func Chunk[T any](seq iter.Seq[T], size int) iter.Seq[iter.Seq[T]] {
 	}
 	return func(yield func(iter.Seq[T]) bool) {
 		var chunk []T
+		// The first chunk grows via append so a sequence shorter than size never
+		// over-allocates; once a chunk has filled, later ones preallocate exactly size.
+		full := false
 		for t := range seq {
-			if chunk == nil {
+			if chunk == nil && full {
 				chunk = make([]T, 0, size)
 			}
 			chunk = append(chunk, t)
 			if len(chunk) == size {
+				full = true
 				if !yield(With(chunk...)) {
 					return
 				}
@@ -467,12 +471,16 @@ func ChunkKV[K, V any](seq iter.Seq2[K, V], size int) iter.Seq[iter.Seq2[K, V]] 
 	}
 	return func(yield func(iter.Seq2[K, V]) bool) {
 		var chunk []KV[K, V]
+		// The first chunk grows via append so a sequence shorter than size never
+		// over-allocates; once a chunk has filled, later ones preallocate exactly size.
+		full := false
 		for k, v := range seq {
-			if chunk == nil {
+			if chunk == nil && full {
 				chunk = make([]KV[K, V], 0, size)
 			}
 			chunk = append(chunk, KV[K, V]{K: k, V: v})
 			if len(chunk) == size {
+				full = true
 				if !yield(WithKV(chunk...)) {
 					return
 				}
