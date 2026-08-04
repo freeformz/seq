@@ -24,3 +24,6 @@ go.work.sum
 # env file
 .env
 .aider*
+
+# git-mcp-server writes its logs into the cwd
+logs/

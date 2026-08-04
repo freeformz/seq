@@ -24,7 +24,7 @@ func With[T any](v ...T) iter.Seq[T] {
 // to use and then use that, like so:
 //
 //	func(...) {
-//		type lKV = KV[string, string]}
+//		type lKV = KV[string, string]
 //		i := WithKV(lKV{"a", "1"}, lKV{"b", "2"}, lKV{"c", "3"})
 //	...
 type KV[K, V any] struct {
@@ -282,7 +282,7 @@ func MaxFuncKV[K, V any](seq iter.Seq2[K, V], compare func(KV[K, V], KV[K, V]) i
 	return mt, value
 }
 
-// Min value from the sequence. Uses min built in to compare values. The second value is false if the sequence is empty. The
+// Min value from the sequence. Uses min builtin to compare values. The second value is false if the sequence is empty. The
 // sequence is iterated over before Min returns.
 func Min[T cmp.Ordered](seq iter.Seq[T]) (T, bool) {
 	var mt T
@@ -367,7 +367,7 @@ func Compact[T comparable](seq iter.Seq[T]) iter.Seq[T] {
 	}
 }
 
-// CompactFunc is like [Compact] but uses an the function to compare elements. For runs of elements that compare equal,
+// CompactFunc is like [Compact] but uses the function to compare elements. For runs of elements that compare equal,
 // CompactFunc only yields the first one. The provided sequence is iterated over lazily when the returned sequence is
 // iterated over.
 func CompactFunc[T any](seq iter.Seq[T], equal func(T, T) bool) iter.Seq[T] {
@@ -812,7 +812,7 @@ func CountValues[T comparable](seq iter.Seq[T]) iter.Seq2[T, int] {
 	}
 }
 
-// Drop n elements from the starts of the sequence. The provided sequence is iterated over lazily when the returned
+// Drop n elements from the start of the sequence. The provided sequence is iterated over lazily when the returned
 // sequence is iterated over.
 func Drop[T any](seq iter.Seq[T], n int) iter.Seq[T] {
 	return func(yield func(T) bool) {
@@ -829,7 +829,7 @@ func Drop[T any](seq iter.Seq[T], n int) iter.Seq[T] {
 	}
 }
 
-// DropKV n key-value pairs from the starts of the sequence. The provided sequence is iterated over lazily when the returned
+// DropKV n key-value pairs from the start of the sequence. The provided sequence is iterated over lazily when the returned
 // sequence is iterated over.
 func DropKV[K, V any](seq iter.Seq2[K, V], n int) iter.Seq2[K, V] {
 	return func(yield func(K, V) bool) {
